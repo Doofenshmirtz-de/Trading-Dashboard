@@ -91,7 +91,7 @@ export default defineConfig({
     cwd: FRONTEND_DIR,
     url: FRONTEND_ORIGIN,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: process.env.CI ? 180_000 : 120_000,
     env: e2eSupabaseEnv,
   },
 })

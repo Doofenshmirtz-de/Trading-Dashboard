@@ -1,0 +1,18 @@
+import { Navigate } from 'react-router-dom'
+import { LoginForm } from '../components/auth/LoginForm'
+import { useAuth } from '../context/AuthContext'
+
+export function Login() {
+  const { user } = useAuth()
+
+  if (user) return <Navigate to="/dashboard" replace />
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 pt-16">
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 w-full max-w-md">
+        <h1 className="text-2xl font-bold text-white mb-6 text-center">Sign In</h1>
+        <LoginForm />
+      </div>
+    </div>
+  )
+}

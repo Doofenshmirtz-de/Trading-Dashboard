@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 
-interface AuthContextType {
+export interface AuthContextType {
   user: User | null
   loading: boolean
   signOut: () => Promise<void>
@@ -16,35 +16,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
+    let cancelled = false
+    let subscription: { unsubscribe: () => void } | null = null
 
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+    const init = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (cancelled) {
+          return
+        }
+        if (error) {
+          setUser(null)
+        } else {
+          setUser(data.session?.user ?? null)
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null)
+        }
+      }
+
+      if (cancelled) {
+        return
+      }
+
+      try {
+        const { data: listener } = supabase.auth.onAuthStateChange(
+          (_event, session) => {
+            if (cancelled) {
+              return
+            }
+            setUser(session?.user ?? null)
+          }
+        )
+        subscription = listener.subscription
+        if (cancelled) {
+          listener.subscription.unsubscribe()
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null)
+        }
+      }
+    }
+
+    void init().finally(() => {
+      if (!cancelled) {
+        setLoading(false)
+      }
     })
 
     return () => {
-      data.subscription.unsubscribe()
+      cancelled = true
+      subscription?.unsubscribe()
     }
   }, [])
 
-  const signOut = async () => {
-    await supabase.auth.signOut()
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-900">
-        <div className="w-8 h-8 border-t-2 border-blue-500 rounded-full animate-spin" />
-      </div>
-    )
-  }
+  const signOut = useCallback(async () => {
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // Session-Update folgt über onAuthStateChange
+    }
+  }, [])
 
   return (
     <AuthContext.Provider value={{ user, loading, signOut }}>
-      {children}
+      {loading ? (
+        <div
+          className="flex items-center justify-center min-h-screen"
+          style={{ minHeight: '100vh', backgroundColor: '#0f172a' }}
+        >
+          <div
+            className="w-8 h-8 border-t-2 border-blue-500 rounded-full animate-spin"
+            aria-label="Laden"
+            role="status"
+          />
+        </div>
+      ) : (
+        children
+      )}
     </AuthContext.Provider>
   )
 }

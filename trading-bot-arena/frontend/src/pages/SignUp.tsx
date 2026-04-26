@@ -3,9 +3,14 @@ import { SignUpForm } from '../components/auth/SignUpForm'
 import { useAuth } from '../context/AuthContext'
 
 export function SignUp() {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
 
-  if (user) return <Navigate to="/dashboard" replace />
+  if (loading) {
+    return null
+  }
+  if (user) {
+    return <Navigate to="/dashboard" replace />
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 pt-16">

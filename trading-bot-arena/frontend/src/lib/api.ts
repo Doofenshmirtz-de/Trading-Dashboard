@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { addLog } from './requestLog'
 import type {
   Bot,
   HealthResponse,
@@ -11,7 +12,7 @@ import type {
   ApiError,
 } from '../types'
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
+export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 let _showToast: ((msg: string, type: 'success' | 'error' | 'info') => void) | null = null
 
@@ -48,17 +49,35 @@ async function apiFetch<T>(
   }
 
   let lastError: ApiError & Error = makeApiError(0, 'Network error')
+  const t0 = performance.now()
+  let attempt = 0
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  for (; attempt <= retries; attempt++) {
     try {
       const res = await fetch(`${API_URL}${path}`, { ...options, headers })
 
       if (res.status === 401) {
+        addLog({
+          method: options.method ?? 'GET',
+          url: `${API_URL}${path}`,
+          status: 401,
+          latency_ms: Math.round(performance.now() - t0),
+          error: 'Unauthorized',
+          retries: attempt,
+        })
         window.location.href = '/login'
         throw makeApiError(401, 'Unauthorized')
       }
 
       if (res.ok) {
+        addLog({
+          method: options.method ?? 'GET',
+          url: `${API_URL}${path}`,
+          status: res.status,
+          latency_ms: Math.round(performance.now() - t0),
+          error: null,
+          retries: attempt,
+        })
         if (res.status === 204) return undefined as T
         return (await res.json()) as T
       }
@@ -67,14 +86,21 @@ async function apiFetch<T>(
       lastError = makeApiError(res.status, body.detail ?? res.statusText)
 
       if (res.status >= 500 && attempt < retries) {
-        const delay = (attempt + 1) * 1000
         if (_showToast && attempt === 0) {
           _showToast('Service temporarily unavailable. Retrying...', 'error')
         }
-        await sleep(delay)
+        await sleep((attempt + 1) * 1000)
         continue
       }
 
+      addLog({
+        method: options.method ?? 'GET',
+        url: `${API_URL}${path}`,
+        status: res.status,
+        latency_ms: Math.round(performance.now() - t0),
+        error: lastError.message,
+        retries: attempt,
+      })
       throw lastError
     } catch (err) {
       if ((err as ApiError).status === 401) throw err
@@ -82,13 +108,20 @@ async function apiFetch<T>(
 
       lastError = makeApiError(0, err instanceof Error ? err.message : 'Network error')
       if (attempt < retries) {
-        const delay = (attempt + 1) * 1000
-        await sleep(delay)
+        await sleep((attempt + 1) * 1000)
         continue
       }
     }
   }
 
+  addLog({
+    method: options.method ?? 'GET',
+    url: `${API_URL}${path}`,
+    status: null,
+    latency_ms: Math.round(performance.now() - t0),
+    error: lastError.message,
+    retries: attempt - 1,
+  })
   throw lastError
 }
 
@@ -96,19 +129,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export function fetchHealth(): Promise<HealthResponse> {
-  return apiFetch<HealthResponse>('/health', {}, 0)
+// Public — no JWT, no retry, no redirect
+export async function fetchHealth(): Promise<HealthResponse> {
+  if (!API_URL) throw makeApiError(0, 'VITE_API_URL is not configured')
+  const t0 = performance.now()
+  try {
+    const res = await fetch(`${API_URL}/health`)
+    const latency_ms = Math.round(performance.now() - t0)
+    if (!res.ok) {
+      addLog({ method: 'GET', url: `${API_URL}/health`, status: res.status, latency_ms, error: res.statusText, retries: 0 })
+      throw makeApiError(res.status, res.statusText)
+    }
+    addLog({ method: 'GET', url: `${API_URL}/health`, status: res.status, latency_ms, error: null, retries: 0 })
+    return res.json() as Promise<HealthResponse>
+  } catch (err) {
+    const latency_ms = Math.round(performance.now() - t0)
+    const msg = err instanceof Error ? err.message : 'Network error'
+    addLog({ method: 'GET', url: `${API_URL}/health`, status: null, latency_ms, error: msg, retries: 0 })
+    throw err
+  }
 }
 
 export function fetchPairs(): Promise<TradingPair[]> {
   return apiFetch<TradingPair[]>('/market/pairs')
 }
 
-export function fetchCandles(
-  symbol: string,
-  timeframe: string,
-  limit = 100,
-): Promise<Candle[]> {
+export function fetchCandles(symbol: string, timeframe: string, limit = 100): Promise<Candle[]> {
   const params = new URLSearchParams({ symbol, timeframe, limit: String(limit) })
   return apiFetch<Candle[]>(`/market/candles?${params}`)
 }

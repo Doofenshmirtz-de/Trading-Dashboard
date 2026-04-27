@@ -1,6 +1,13 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
+const NAV_LINKS = [
+  { to: '/dashboard', label: 'Overview' },
+  { to: '/bots', label: 'Bots' },
+  { to: '/markets', label: 'Markets' },
+  { to: '/debug', label: '🛠', title: 'Debug' },
+]
+
 export function Navbar() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
@@ -14,47 +21,29 @@ export function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-slate-900 border-b border-slate-700">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <Link to="/" className="text-white font-bold text-lg tracking-tight">
+          <Link to="/" className="text-white font-bold text-lg tracking-tight shrink-0">
             Trading Bot Arena
           </Link>
           {user && (
             <div className="hidden sm:flex items-center gap-1">
-              <NavLink
-                to="/dashboard"
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-slate-700 text-white'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`
-                }
-              >
-                Overview
-              </NavLink>
-              <NavLink
-                to="/bots"
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-slate-700 text-white'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`
-                }
-              >
-                Bots
-              </NavLink>
-              <NavLink
-                to="/markets"
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-slate-700 text-white'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                  }`
-                }
-              >
-                Markets
-              </NavLink>
+              {NAV_LINKS.map(({ to, label, title }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  title={title}
+                  className={({ isActive }) =>
+                    `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-slate-700 text-white'
+                        : to === '/debug'
+                          ? 'text-slate-600 hover:text-slate-400 hover:bg-slate-800'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`
+                  }
+                >
+                  {label}
+                </NavLink>
+              ))}
             </div>
           )}
         </div>
@@ -74,10 +63,7 @@ export function Navbar() {
             </>
           ) : (
             <>
-              <Link
-                to="/login"
-                className="text-slate-300 hover:text-white text-sm transition-colors"
-              >
+              <Link to="/login" className="text-slate-300 hover:text-white text-sm transition-colors">
                 Login
               </Link>
               <Link

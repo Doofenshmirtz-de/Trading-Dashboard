@@ -4,6 +4,9 @@ import { defineConfig, devices } from '@playwright/test'
 const FRONTEND_DIR = path.join(__dirname, 'trading-bot-arena', 'frontend')
 /* E2E-nur: freier fester Port, kollidiert nicht mit ggf. laufendem Vite (5173) */
 const E2E_PORT = 4173
+/* Explizit IPv4: auf Linux/Ubuntu-CI löst Node ≥18 "localhost" zuerst als
+   ::1 (IPv6) auf; Vite wird mit --host 127.0.0.1 gestartet, Playwright
+   wartet auf dieselbe Adresse → kein 180 s Timeout mehr */
 const FRONTEND_ORIGIN = `http://127.0.0.1:${E2E_PORT}`
 
 /* Supabase-Client braucht definierte Vite-Env, sonst bleibt Auth-Loading hängen */
@@ -87,7 +90,7 @@ export default defineConfig({
 
   /* Vite-Dev-Server fürs Frontend (Root → trading-bot-arena/frontend) */
   webServer: {
-    command: `npm run dev -- --port ${E2E_PORT} --strictPort`,
+    command: `npm run dev -- --port ${E2E_PORT} --strictPort --host 127.0.0.1`,
     cwd: FRONTEND_DIR,
     url: FRONTEND_ORIGIN,
     reuseExistingServer: !process.env.CI,

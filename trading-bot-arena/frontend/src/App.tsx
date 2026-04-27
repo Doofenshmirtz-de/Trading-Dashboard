@@ -4,6 +4,8 @@ import { ProtectedRoute } from './components/layout/ProtectedRoute'
 import { Login } from './pages/Login'
 import { SignUp } from './pages/SignUp'
 import { Dashboard } from './pages/Dashboard'
+import { BotsPage } from './pages/BotsPage'
+import { MarketsPage } from './pages/MarketsPage'
 import { useAuth } from './context/AuthContext'
 
 function RootLayout() {
@@ -17,13 +19,8 @@ function RootLayout() {
 
 function HomeRoute() {
   const { user, loading } = useAuth()
-
-  if (loading) {
-    return null
-  }
-  if (user) {
-    return <Navigate to="/dashboard" replace />
-  }
+  if (loading) return null
+  if (user) return <Navigate to="/dashboard" replace />
   return <Navigate to="/login" replace />
 }
 
@@ -37,6 +34,8 @@ export default function App() {
           <Route path="/signup" element={<SignUp />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/bots" element={<BotsPage />} />
+            <Route path="/markets" element={<MarketsPage />} />
           </Route>
         </Route>
       </Routes>

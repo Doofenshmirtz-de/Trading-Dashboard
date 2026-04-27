@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
 export function Navbar() {
@@ -13,14 +13,56 @@ export function Navbar() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-slate-900 border-b border-slate-700">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <Link to="/" className="text-white font-bold text-lg tracking-tight">
-          Trading Bot Arena
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link to="/" className="text-white font-bold text-lg tracking-tight">
+            Trading Bot Arena
+          </Link>
+          {user && (
+            <div className="hidden sm:flex items-center gap-1">
+              <NavLink
+                to="/dashboard"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-slate-700 text-white'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`
+                }
+              >
+                Overview
+              </NavLink>
+              <NavLink
+                to="/bots"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-slate-700 text-white'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`
+                }
+              >
+                Bots
+              </NavLink>
+              <NavLink
+                to="/markets"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'bg-slate-700 text-white'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`
+                }
+              >
+                Markets
+              </NavLink>
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center gap-4">
           {user ? (
             <>
-              <span className="text-slate-400 text-sm truncate max-w-[200px]">
+              <span className="text-slate-400 text-sm truncate max-w-[200px] hidden sm:block">
                 {user.email}
               </span>
               <button

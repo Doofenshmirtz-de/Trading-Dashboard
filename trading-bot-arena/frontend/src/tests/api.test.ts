@@ -56,23 +56,21 @@ describe('apiFetch retry logic', () => {
     expect(result.total).toBe(0)
   })
 
-  it('does NOT retry on 401 — redirects to /login immediately', async () => {
-    Object.defineProperty(window, 'location', {
-      value: { href: '' },
-      writable: true,
-      configurable: true,
-    })
+  it('does NOT retry on 401 — calls unauthorizedHandler exactly once', async () => {
+    const handler = vi.fn()
+    const { registerUnauthorizedHandler } = await import('../lib/api')
+    registerUnauthorizedHandler(handler)
 
     vi.mocked(fetch).mockResolvedValue(makeErrResponse(401, 'unauthorized'))
 
     try {
       await fetchBots()
     } catch {
-      // expected
+      // expected — 401 always throws
     }
 
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
-    expect(window.location.href).toBe('/login')
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 
   it('throws ApiError with status 503 after all retries exhausted', async () => {

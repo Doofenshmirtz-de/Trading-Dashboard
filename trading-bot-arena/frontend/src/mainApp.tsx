@@ -5,11 +5,19 @@ import App from './App'
 import { AuthProvider } from './context/AuthContext'
 import { ToastProvider, useToast } from './components/ui/Toast'
 import { queryClient } from './lib/queryClient'
-import { registerToastCallback } from './lib/api'
+import { registerToastCallback, registerUnauthorizedHandler } from './lib/api'
+import { supabase } from './lib/supabase'
 
-function AppWithToast() {
+function AppWithProviders() {
   const { show } = useToast()
   registerToastCallback(show)
+
+  // On 401: soft sign-out → onAuthStateChange fires → user = null
+  // → ProtectedRoute redirects to /login (no hard reload, no loop)
+  registerUnauthorizedHandler(() => {
+    void supabase.auth.signOut()
+  })
+
   return <App />
 }
 
@@ -18,7 +26,7 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <AuthProvider>
-          <AppWithToast />
+          <AppWithProviders />
         </AuthProvider>
       </ToastProvider>
     </QueryClientProvider>

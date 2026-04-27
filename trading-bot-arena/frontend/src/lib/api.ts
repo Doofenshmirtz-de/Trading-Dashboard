@@ -15,11 +15,19 @@ import type {
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 let _showToast: ((msg: string, type: 'success' | 'error' | 'info') => void) | null = null
+// Called instead of window.location.href — triggers soft signOut so
+// onAuthStateChange fires, user → null, ProtectedRoute redirects to /login.
+// No hard page reload → no redirect loop.
+let _onUnauthorized: (() => void) | null = null
 
 export function registerToastCallback(
   fn: (msg: string, type: 'success' | 'error' | 'info') => void,
 ): void {
   _showToast = fn
+}
+
+export function registerUnauthorizedHandler(fn: () => void): void {
+  _onUnauthorized = fn
 }
 
 function makeApiError(status: number, message: string): ApiError & Error {
@@ -65,7 +73,9 @@ async function apiFetch<T>(
           error: 'Unauthorized',
           retries: attempt,
         })
-        window.location.href = '/login'
+        // Soft sign-out: triggers onAuthStateChange → user = null →
+        // ProtectedRoute redirects to /login — no hard reload, no loop
+        _onUnauthorized?.()
         throw makeApiError(401, 'Unauthorized')
       }
 
@@ -129,7 +139,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// Public — no JWT, no retry, no redirect
+// Public — no JWT, no redirect, no retry
 export async function fetchHealth(): Promise<HealthResponse> {
   if (!API_URL) throw makeApiError(0, 'VITE_API_URL is not configured')
   const t0 = performance.now()

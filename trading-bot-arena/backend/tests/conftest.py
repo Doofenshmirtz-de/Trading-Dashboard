@@ -10,7 +10,7 @@ TEST_USER_ID = "00000000-0000-0000-0000-000000000001"
 TEST_USER_EMAIL = "test@example.com"
 
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
-os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
 os.environ.setdefault("ENVIRONMENT", "test")
 

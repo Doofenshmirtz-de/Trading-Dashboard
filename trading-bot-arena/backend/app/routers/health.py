@@ -1,3 +1,4 @@
+import asyncio
 import time
 from fastapi import APIRouter
 from app.services import binance as binance_service
@@ -55,9 +56,18 @@ async def _check_binance() -> tuple[bool, int | None, str | None]:
 async def _check_supabase() -> tuple[bool, int | None, str | None]:
     t0 = time.time()
     try:
+        loop = asyncio.get_event_loop()
         client = get_supabase_client()
-        client.table("bots").select("id").limit(1).execute()
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: client.table("bots").select("id").limit(1).execute(),
+            ),
+            timeout=8.0,
+        )
         latency = int((time.time() - t0) * 1000)
         return True, latency, None
+    except asyncio.TimeoutError:
+        return False, None, "Supabase connectivity check timed out (8s)"
     except Exception as e:
         return False, None, str(e)

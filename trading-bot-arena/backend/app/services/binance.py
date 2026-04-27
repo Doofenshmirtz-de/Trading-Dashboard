@@ -128,11 +128,15 @@ async def get_ticker(symbol: str) -> dict:
 
 
 async def check_connectivity() -> tuple[bool, int | None, str | None]:
+    import asyncio
+
     exchange = _get_exchange()
     t0 = time.time()
     try:
-        await exchange.fetch_time()
+        await asyncio.wait_for(exchange.fetch_time(), timeout=8.0)
         latency = int((time.time() - t0) * 1000)
         return True, latency, None
+    except asyncio.TimeoutError:
+        return False, None, "Binance connectivity check timed out (8s)"
     except Exception as e:
         return False, None, str(e)

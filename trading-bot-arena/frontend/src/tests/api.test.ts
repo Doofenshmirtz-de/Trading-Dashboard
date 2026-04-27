@@ -12,7 +12,7 @@ vi.mock('../lib/supabase', () => ({
 }))
 
 // Import after mocks (using fetchBots which uses default retries=3)
-const { fetchBots, fetchHealth } = await import('../lib/api')
+const { fetchBots } = await import('../lib/api')
 
 function makeOkResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

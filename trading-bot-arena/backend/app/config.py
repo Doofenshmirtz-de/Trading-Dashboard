@@ -8,7 +8,9 @@ class Settings(BaseSettings):
 
     SUPABASE_URL: str
     SUPABASE_SERVICE_ROLE_KEY: str
-    SUPABASE_JWT_SECRET: str
+    # Optional for legacy HS256 projects. Newer Supabase projects use JWKS
+    # (RS256/ES256) — leave empty and the backend fetches keys automatically.
+    SUPABASE_JWT_SECRET: str = ""
     BINANCE_API_KEY: str = ""
     BINANCE_SECRET: str = ""
     ENVIRONMENT: str = "production"

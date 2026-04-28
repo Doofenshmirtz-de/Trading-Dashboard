@@ -1,29 +1,29 @@
 """
-JWT verification that supports both Supabase token formats:
+JWT verification for Supabase access tokens — three-layer strategy:
 
-  Legacy projects:  HS256 signed with SUPABASE_JWT_SECRET
-  New projects:     RS256 / ES256 signed with a rotating key from JWKS
+  1. HS256 with SUPABASE_JWT_SECRET  (legacy projects + tests, no network call)
+  2. JWKS local verification         (new projects, RS256/ES256, keys cached 1h)
+  3. Supabase /auth/v1/user API      (guaranteed fallback, always works)
 
-Strategy (in order):
-  1. If SUPABASE_JWT_SECRET is set → try HS256 first (fast, no network call)
-  2. Fetch JWKS from Supabase's well-known endpoint (cached for 1 hour)
-  3. Verify with matching key from JWKS
+Layers are tried in order; first success wins.
 """
 
 import time
+import logging
 import httpx
-from jose import jwt
+from jose import jwk, jwt
 from jose.exceptions import JWTError
 
 from app.config import settings
 from app.core.exceptions import UnauthorizedError
-from app.core.logging import get_logger
 
-logger = get_logger()
+logger = logging.getLogger("trading_bot_arena")
 
 _jwks_cache: dict = {"keys": [], "cached_at": 0.0}
 _JWKS_TTL = 3600  # seconds
 
+
+# ── Layer 2 helper: fetch + cache JWKS ────────────────────────────────────────
 
 async def _fetch_jwks() -> list[dict]:
     now = time.time()
@@ -31,33 +31,88 @@ async def _fetch_jwks() -> list[dict]:
         return _jwks_cache["keys"]  # type: ignore[return-value]
 
     url = f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+    async with httpx.AsyncClient(timeout=8) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+
+    keys: list[dict] = data.get("keys", [])
+    _jwks_cache["keys"] = keys
+    _jwks_cache["cached_at"] = now
+    logger.info("JWKS refreshed", extra={"key_count": len(keys)})
+    return keys
+
+
+def _try_jwks_verify(token: str, keys: list[dict]) -> dict | None:
+    """Try to verify token against JWKS keys. Returns payload or None."""
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+        header = jwt.get_unverified_header(token)
+    except JWTError:
+        return None
 
-        keys: list[dict] = data.get("keys", [])
-        _jwks_cache["keys"] = keys
-        _jwks_cache["cached_at"] = now
-        logger.info("JWKS fetched", extra={"key_count": len(keys), "url": url})
-        return keys
-    except Exception as e:
-        logger.error("Failed to fetch JWKS", extra={"error": str(e), "url": url})
-        # Return stale cache if available rather than failing
-        if _jwks_cache["keys"]:
-            logger.warning("Using stale JWKS cache")
-            return _jwks_cache["keys"]  # type: ignore[return-value]
-        raise
+    token_kid: str | None = header.get("kid")
+    token_alg: str = header.get("alg", "RS256")
 
+    candidates = (
+        [k for k in keys if k.get("kid") == token_kid]
+        if token_kid
+        else keys
+    )
+    if not candidates:
+        candidates = keys  # kid mismatch — try all keys anyway
+
+    for key_data in candidates:
+        alg = key_data.get("alg") or token_alg
+        try:
+            # jwk.construct builds the proper Key object for RSA/EC/HS dicts
+            constructed = jwk.construct(key_data, algorithm=alg)
+            payload = jwt.decode(
+                token,
+                constructed.to_dict(),
+                algorithms=[alg, "RS256", "ES256", "HS256"],
+                options={"verify_aud": False},
+            )
+            return payload
+        except (JWTError, Exception):
+            continue
+    return None
+
+
+# ── Layer 3 helper: delegate to Supabase auth server ─────────────────────────
+
+async def _verify_via_supabase_api(token: str) -> dict:
+    """Call GET /auth/v1/user — works for all signing methods."""
+    url = f"{settings.SUPABASE_URL}/auth/v1/user"
+    async with httpx.AsyncClient(timeout=8) as client:
+        resp = await client.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
+            },
+        )
+
+    if resp.status_code == 401:
+        raise UnauthorizedError("Invalid or expired token")
+    if not resp.is_success:
+        raise UnauthorizedError(
+            f"Supabase auth check failed with status {resp.status_code}"
+        )
+
+    data = resp.json()
+    logger.debug("Token verified via Supabase API", extra={"user_id": data.get("id")})
+    return {"sub": data["id"], "email": data.get("email")}
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
 
 async def verify_supabase_token(token: str) -> dict:
     """
     Verify a Supabase access token.
-    Tries HS256 (legacy) first, then falls back to JWKS (new projects).
-    Returns the decoded JWT payload on success, raises UnauthorizedError on failure.
+    Returns the decoded payload dict with at least 'sub' (user UUID) and 'email'.
+    Raises UnauthorizedError on failure.
     """
-    # ── Approach 1: HS256 with legacy secret ──────────────────────────────────
+    # Layer 1 — HS256 legacy secret (also used by tests)
     if settings.SUPABASE_JWT_SECRET:
         try:
             return jwt.decode(
@@ -67,45 +122,18 @@ async def verify_supabase_token(token: str) -> dict:
                 options={"verify_aud": False},
             )
         except JWTError:
-            # Secret is set but verification failed — fall through to JWKS
-            pass
+            pass  # fall through to JWKS
 
-    # ── Approach 2: JWKS (RS256 / ES256) ──────────────────────────────────────
+    # Layer 2 — local JWKS verification (RS256 / ES256)
     try:
         keys = await _fetch_jwks()
+        if keys:
+            result = _try_jwks_verify(token, keys)
+            if result is not None:
+                return result
     except Exception as e:
-        raise UnauthorizedError(f"Unable to fetch JWKS for token verification: {e}") from e
+        logger.warning("JWKS verification skipped", extra={"reason": str(e)})
 
-    if not keys:
-        raise UnauthorizedError("JWKS returned no keys")
-
-    # Match by key ID (kid) in the token header for efficiency
-    try:
-        header = jwt.get_unverified_header(token)
-        token_kid: str | None = header.get("kid")
-        token_alg: str = header.get("alg", "RS256")
-    except JWTError as e:
-        raise UnauthorizedError(f"Invalid token header: {e}") from e
-
-    candidates = (
-        [k for k in keys if k.get("kid") == token_kid]
-        if token_kid
-        else keys
-    )
-
-    for key_data in candidates:
-        alg = key_data.get("alg") or token_alg
-        try:
-            payload = jwt.decode(
-                token,
-                key_data,
-                algorithms=[alg, "RS256", "ES256"],
-                options={"verify_aud": False},
-            )
-            return payload
-        except JWTError:
-            continue
-
-    raise UnauthorizedError(
-        "Token signature verification failed against all available JWKS keys"
-    )
+    # Layer 3 — Supabase API (guaranteed fallback)
+    logger.debug("Falling back to Supabase API verification")
+    return await _verify_via_supabase_api(token)

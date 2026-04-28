@@ -7,6 +7,11 @@ vi.mock('../lib/supabase', () => ({
       getSession: vi.fn().mockResolvedValue({
         data: { session: { access_token: 'test-token' } },
       }),
+      // Return no session on refresh so 401 proceeds to unauthorizedHandler
+      refreshSession: vi.fn().mockResolvedValue({
+        data: { session: null },
+        error: null,
+      }),
     },
   },
 }))

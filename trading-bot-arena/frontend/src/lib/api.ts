@@ -15,10 +15,10 @@ import type {
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 let _showToast: ((msg: string, type: 'success' | 'error' | 'info') => void) | null = null
-// Called instead of window.location.href — triggers soft signOut so
-// onAuthStateChange fires, user → null, ProtectedRoute redirects to /login.
-// No hard page reload → no redirect loop.
 let _onUnauthorized: (() => void) | null = null
+
+// Prevent cascade: only fire once per 15 seconds across all concurrent requests
+let _lastUnauthorizedAt = 0
 
 export function registerToastCallback(
   fn: (msg: string, type: 'success' | 'error' | 'info') => void,
@@ -47,35 +47,54 @@ async function apiFetch<T>(
   options: RequestInit = {},
   retries = 3,
 ): Promise<T> {
-  const token = await getAuthToken()
+  let token = await getAuthToken()
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
 
   let lastError: ApiError & Error = makeApiError(0, 'Network error')
   const t0 = performance.now()
   let attempt = 0
+  let sessionRefreshed = false
 
   for (; attempt <= retries; attempt++) {
     try {
       const res = await fetch(`${API_URL}${path}`, { ...options, headers })
 
       if (res.status === 401) {
+        // First 401: try to silently refresh the session once before giving up.
+        // This handles race conditions where the page renders just before
+        // the Supabase session is fully hydrated from storage.
+        if (!sessionRefreshed) {
+          sessionRefreshed = true
+          const { data } = await supabase.auth.refreshSession()
+          if (data.session) {
+            token = data.session.access_token
+            headers['Authorization'] = `Bearer ${token}`
+            attempt-- // retry immediately with new token
+            continue
+          }
+        }
+
         addLog({
           method: options.method ?? 'GET',
           url: `${API_URL}${path}`,
           status: 401,
           latency_ms: Math.round(performance.now() - t0),
-          error: 'Unauthorized',
+          error: 'Unauthorized — session refresh failed',
           retries: attempt,
         })
-        // Soft sign-out: triggers onAuthStateChange → user = null →
-        // ProtectedRoute redirects to /login — no hard reload, no loop
-        _onUnauthorized?.()
+
+        // Debounce: only trigger signOut once per 15 seconds to prevent cascade
+        const now = Date.now()
+        if (now - _lastUnauthorizedAt > 15_000) {
+          _lastUnauthorizedAt = now
+          _onUnauthorized?.()
+        }
+
         throw makeApiError(401, 'Unauthorized')
       }
 

@@ -52,6 +52,20 @@ function truncate(s: string, n = 40) {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+function fmtDurationSince(iso?: string) {
+  if (!iso) return '—'
+  const startedAt = new Date(iso).getTime()
+  if (Number.isNaN(startedAt)) return '—'
+  const diffMs = Date.now() - startedAt
+  const totalMin = Math.max(0, Math.floor(diffMs / 60000))
+  const days = Math.floor(totalMin / (60 * 24))
+  const hours = Math.floor((totalMin % (60 * 24)) / 60)
+  const mins = totalMin % 60
+  if (days > 0) return `${days}d ${hours}h ${mins}m`
+  if (hours > 0) return `${hours}h ${mins}m`
+  return `${mins}m`
+}
+
 // ── Stat Card ──────────────────────────────────────────────────────────────────
 
 function StatCard({
@@ -145,6 +159,13 @@ export function BotDetail() {
 
   const lastPnlPct = snapshots.length ? snapshots[snapshots.length - 1].pnl_pct : 0
   const chartColour = lastPnlPct >= 0 ? '#22c55e' : '#ef4444'
+  const config = (bot?.config as Record<string, unknown> | undefined) ?? {}
+  const lastSignal = signals.length > 0 ? signals[0] : null
+  const lastSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null
+  const debugHint =
+    bot?.status === 'running' && signals.length === 0
+      ? 'Bot läuft, aber keine Signale vorhanden. Prüfe Railway Logs auf Tick-Fehler.'
+      : null
 
   const updateMutation = useMutation({
     mutationFn: (status: BotStatus) => updateBot(botId, { status }),
@@ -272,6 +293,56 @@ export function BotDetail() {
                 : undefined
             }
           />
+        </div>
+
+        {/* Debug Info */}
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white font-semibold">Debug Informationen</h2>
+            <span className="text-xs text-slate-500">Live polling: 60s</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+              <p className="text-xs text-slate-400 mb-1">Time online (seit updated_at)</p>
+              <p className="text-sm text-white font-medium">{fmtDurationSince(bot?.updated_at)}</p>
+            </div>
+            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+              <p className="text-xs text-slate-400 mb-1">Signals (geladen)</p>
+              <p className="text-sm text-white font-medium">{signals.length}</p>
+            </div>
+            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+              <p className="text-xs text-slate-400 mb-1">Trades (geladen)</p>
+              <p className="text-sm text-white font-medium">{trades.length}</p>
+            </div>
+            <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
+              <p className="text-xs text-slate-400 mb-1">Letzter Snapshot</p>
+              <p className="text-sm text-white font-medium">{lastSnapshot ? fmtDate(lastSnapshot.timestamp) : '—'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-slate-400 mb-2">Aktive Bot-Config</p>
+              <pre className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs text-slate-300 overflow-x-auto">
+{JSON.stringify(config, null, 2)}
+              </pre>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400">Signal / Runner Status</p>
+              <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs text-slate-300 space-y-1">
+                <p>Status: <span className="text-white">{bot?.status ?? '—'}</span></p>
+                <p>Timeframe: <span className="text-white">{String(config.timeframe ?? '—')}</span></p>
+                <p>RSI period: <span className="text-white">{String(config.period ?? '—')}</span></p>
+                <p>Oversold / Overbought: <span className="text-white">{String(config.oversold ?? '—')} / {String(config.overbought ?? '—')}</span></p>
+                <p>Last Signal: <span className="text-white">{lastSignal ? `${lastSignal.action.toUpperCase()} @ ${fmtDate(lastSignal.timestamp)}` : 'none'}</span></p>
+              </div>
+              {debugHint && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-xs text-amber-300">
+                  {debugHint}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Equity Curve */}

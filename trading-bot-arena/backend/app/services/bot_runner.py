@@ -48,8 +48,17 @@ def _make_bot(bot_type: str, bot_id: str, config: dict, virtual_balance: float):
     raise ValueError(f"Unsupported bot type for sandbox execution: {bot_type!r}")
 
 
-def _row_to_candle(row: list) -> Candle:
-    """Convert ccxt OHLCV list [ts, o, h, l, c, v] to Candle dataclass."""
+def _row_to_candle(row: dict | list) -> Candle:
+    """Convert candle payload (dict or ccxt list) to Candle dataclass."""
+    if isinstance(row, dict):
+        return Candle(
+            timestamp=int(row["timestamp"]),
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=float(row["volume"]),
+        )
     return Candle(
         timestamp=int(row[0]),
         open=float(row[1]),
@@ -87,7 +96,7 @@ class BotRunner:
         bot_type = bot_record["type"]
         config = bot_record.get("config") or {}
         user_id = str(bot_record["user_id"])
-        name = bot_record["name"]
+        bot_name = bot_record["name"]
         pair = bot_record.get("trading_pair", "BTC/USDT:USDT")
         initial_balance = float(bot_record.get("initial_balance", 10000))
         virtual_balance = float(bot_record.get("virtual_balance", initial_balance))
@@ -106,7 +115,7 @@ class BotRunner:
         except jsonschema.ValidationError as e:
             logger.error(
                 "start_bot skipped: invalid config",
-                extra={"bot_id": bot_id, "name": name, "error": e.message},
+                extra={"bot_id": bot_id, "bot_name": bot_name, "error": e.message},
             )
             return
 
@@ -134,7 +143,7 @@ class BotRunner:
                 bot.on_candle(candle)
             logger.info(
                 "Bot warm-up complete",
-                extra={"bot_id": bot_id, "name": name, "candles": len(raw_candles)},
+                extra={"bot_id": bot_id, "bot_name": bot_name, "candles": len(raw_candles)},
             )
         except Exception as e:
             logger.warning(
@@ -147,18 +156,18 @@ class BotRunner:
             "engine": engine,
             "config": config,
             "user_id": user_id,
-            "name": name,
+            "bot_name": bot_name,
             "pair": pair,
             "timeframe": timeframe,
             "initial_balance": initial_balance,
         }
-        logger.info("Bot started", extra={"bot_id": bot_id, "name": name, "type": bot_type})
+        logger.info("Bot started", extra={"bot_id": bot_id, "bot_name": bot_name, "type": bot_type})
 
     async def stop_bot(self, bot_id: str) -> None:
         if bot_id in self.running:
-            name = self.running[bot_id].get("name", bot_id)
+            bot_name = self.running[bot_id].get("bot_name", bot_id)
             del self.running[bot_id]
-            logger.info("Bot stopped", extra={"bot_id": bot_id, "name": name})
+            logger.info("Bot stopped", extra={"bot_id": bot_id, "bot_name": bot_name})
 
     async def load_running_bots(self) -> None:
         """Called at app startup — re-instantiate all bots with status='running'."""
@@ -200,7 +209,7 @@ class BotRunner:
             except Exception as e:
                 logger.error(
                     "Bot tick error",
-                    extra={"bot_id": bot_id, "name": entry.get("name"), "error": str(e)},
+                    extra={"bot_id": bot_id, "bot_name": entry.get("bot_name"), "error": str(e)},
                 )
 
     async def _tick_bot(self, bot_id: str, entry: dict) -> None:
@@ -209,7 +218,7 @@ class BotRunner:
         user_id = entry["user_id"]
         pair = entry["pair"]
         timeframe = entry["timeframe"]
-        name = entry["name"]
+        bot_name = entry["bot_name"]
         initial_balance = entry["initial_balance"]
 
         # Fetch 2 candles; use candles[-2] = last fully closed candle
@@ -219,7 +228,7 @@ class BotRunner:
             return
 
         candle = _row_to_candle(raw[-2])
-        current_price = float(raw[-1][4])  # latest close for snapshot
+        current_price = float(raw[-1]["close"] if isinstance(raw[-1], dict) else raw[-1][4])  # latest close for snapshot
 
         # Feed candle to bot
         signal = bot.on_candle(candle)
@@ -243,8 +252,9 @@ class BotRunner:
         await self._save_snapshot(bot_id, engine, initial_balance, current_price)
 
         action = signal.action if signal else "none"
+        rsi_text = f"{rsi_value:.1f}" if rsi_value is not None else "n/a"
         logger.info(
-            f"Tick [{timeframe}]: {name} | RSI={rsi_value:.1f if rsi_value is not None else 'n/a'} | "
+            f"Tick [{timeframe}]: {bot_name} | RSI={rsi_text} | "
             f"Signal={action} | Balance={engine.balance:.2f}"
         )
 

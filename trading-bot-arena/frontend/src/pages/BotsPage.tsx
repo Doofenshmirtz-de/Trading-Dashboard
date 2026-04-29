@@ -156,7 +156,7 @@ export function BotsPage() {
                     }}
                     className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
                   >
-                    <option value="rule_based">Rule Based</option>
+                    <option value="rule_based">Rule Based (RSI)</option>
                     <option value="copy_trading">Copy Trading</option>
                     <option value="ml">Machine Learning</option>
                     <option value="custom">Custom</option>
@@ -184,6 +184,91 @@ export function BotsPage() {
                   />
                 </div>
               </div>
+
+              {/* RSI Strategy Config — only shown for rule_based */}
+              {form.type === 'rule_based' && (
+                <div className="border border-slate-600 rounded-xl p-4 space-y-3">
+                  <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">
+                    RSI Strategy Config
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">
+                        Timeframe
+                        <span className="text-slate-500 ml-1 normal-case">(candle interval)</span>
+                      </label>
+                      <select
+                        value={String((form.config as Record<string, unknown>).timeframe ?? '1h')}
+                        onChange={(e) =>
+                          setForm({ ...form, config: { ...form.config, timeframe: e.target.value } })
+                        }
+                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="1m">1m — fast (testing)</option>
+                        <option value="5m">5m</option>
+                        <option value="15m">15m</option>
+                        <option value="1h">1h — default</option>
+                        <option value="4h">4h</option>
+                        <option value="1d">1d — slow</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">
+                        Period
+                        <span className="text-slate-500 ml-1 normal-case">(RSI look-back)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={2}
+                        max={100}
+                        value={Number((form.config as Record<string, unknown>).period ?? 14)}
+                        onChange={(e) =>
+                          setForm({ ...form, config: { ...form.config, period: Number(e.target.value) } })
+                        }
+                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">
+                        Oversold
+                        <span className="text-slate-500 ml-1 normal-case">(BUY below)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={45}
+                        value={Number((form.config as Record<string, unknown>).oversold ?? 30)}
+                        onChange={(e) =>
+                          setForm({ ...form, config: { ...form.config, oversold: Number(e.target.value) } })
+                        }
+                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">
+                        Overbought
+                        <span className="text-slate-500 ml-1 normal-case">(SELL above)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={55}
+                        max={90}
+                        value={Number((form.config as Record<string, unknown>).overbought ?? 70)}
+                        onChange={(e) =>
+                          setForm({ ...form, config: { ...form.config, overbought: Number(e.target.value) } })
+                        }
+                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    BUY when RSI crosses below <strong className="text-slate-400">{String((form.config as Record<string, unknown>).oversold ?? 30)}</strong>,
+                    {' '}SELL when RSI crosses above <strong className="text-slate-400">{String((form.config as Record<string, unknown>).overbought ?? 70)}</strong>.
+                    {' '}Ticks every <strong className="text-slate-400">{String((form.config as Record<string, unknown>).timeframe ?? '1h')}</strong>.
+                    {' '}Use <strong className="text-slate-400">1m</strong> for fast testing.
+                  </p>
+                </div>
+              )}
               <div className="flex gap-3 pt-2">
                 <button
                   type="submit"

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { API_URL } from '../lib/api'
 import { clearLogs, subscribeToLogs } from '../lib/requestLog'
@@ -627,39 +627,27 @@ function BotsDiagnoseSection() {
   const [listResult, setListResult] = useState<{ status: number | null; latency: number; body: string } | null>(null)
   const [deleteResult, setDeleteResult] = useState<{ id: string; status: number | null; body: string } | null>(null)
 
+  // Payload berechnet sich ohne Side-Effects — darf im Render genutzt werden
+  const payload = useMemo<Record<string, unknown> | null>(() => {
+    try {
+      const config = JSON.parse(configJson) as Record<string, unknown>
+      return { name, type: botType, config, virtual_balance: virtualBalance, initial_balance: virtualBalance, trading_pair: tradingPair }
+    } catch {
+      return null
+    }
+  }, [name, botType, configJson, virtualBalance, tradingPair])
+
   function onTypeChange(t: string) {
     setBotType(t)
     setConfigJson(JSON.stringify(BOT_TEMPLATES[t] ?? {}, null, 2))
     setConfigError('')
   }
 
-  function validateConfig(): Record<string, unknown> | null {
-    try {
-      const parsed = JSON.parse(configJson)
-      setConfigError('')
-      return parsed
-    } catch {
-      setConfigError('Ungültiges JSON')
-      return null
-    }
-  }
-
-  function buildPayload(): Record<string, unknown> | null {
-    const config = validateConfig()
-    if (!config) return null
-    return {
-      name,
-      type: botType,
-      config,
-      virtual_balance: virtualBalance,
-      initial_balance: virtualBalance,
-      trading_pair: tradingPair,
-    }
-  }
-
   async function sendCreate() {
-    const payload = buildPayload()
-    if (!payload) return
+    if (!payload) {
+      setConfigError('Ungültiges JSON')
+      return
+    }
     setLoading(true)
     setCreateResult(null)
     const t0 = performance.now()
@@ -727,8 +715,6 @@ function BotsDiagnoseSection() {
       botList = parsed.bots ?? []
     } catch { /* ignore */ }
   }
-
-  const payload = buildPayload()
 
   return (
     <Section title="Bots Diagnose">

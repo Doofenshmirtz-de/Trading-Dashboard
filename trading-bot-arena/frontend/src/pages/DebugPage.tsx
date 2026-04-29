@@ -603,6 +603,334 @@ function EndpointTester() {
   )
 }
 
+// ─── 6. Bots Diagnose ────────────────────────────────────────────────────────
+
+const BOT_TEMPLATES: Record<string, Record<string, unknown>> = {
+  rule_based: { indicator: 'RSI', timeframe: '1h' },
+  copy_trading: { trader_id: 'trader_abc123' },
+  ml: { model_name: 'my_model_v1' },
+  custom: {},
+}
+
+function BotsDiagnoseSection() {
+  const [botType, setBotType] = useState('rule_based')
+  const [name, setName] = useState('Test Bot Debug')
+  const [tradingPair, setTradingPair] = useState('BTC/USDT:USDT')
+  const [virtualBalance, setVirtualBalance] = useState(10000)
+  const [configJson, setConfigJson] = useState(
+    JSON.stringify(BOT_TEMPLATES['rule_based'], null, 2),
+  )
+  const [configError, setConfigError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [listLoading, setListLoading] = useState(false)
+  const [createResult, setCreateResult] = useState<{ status: number | null; latency: number; body: string; error?: string } | null>(null)
+  const [listResult, setListResult] = useState<{ status: number | null; latency: number; body: string } | null>(null)
+  const [deleteResult, setDeleteResult] = useState<{ id: string; status: number | null; body: string } | null>(null)
+
+  function onTypeChange(t: string) {
+    setBotType(t)
+    setConfigJson(JSON.stringify(BOT_TEMPLATES[t] ?? {}, null, 2))
+    setConfigError('')
+  }
+
+  function validateConfig(): Record<string, unknown> | null {
+    try {
+      const parsed = JSON.parse(configJson)
+      setConfigError('')
+      return parsed
+    } catch {
+      setConfigError('Ungültiges JSON')
+      return null
+    }
+  }
+
+  function buildPayload(): Record<string, unknown> | null {
+    const config = validateConfig()
+    if (!config) return null
+    return {
+      name,
+      type: botType,
+      config,
+      virtual_balance: virtualBalance,
+      initial_balance: virtualBalance,
+      trading_pair: tradingPair,
+    }
+  }
+
+  async function sendCreate() {
+    const payload = buildPayload()
+    if (!payload) return
+    setLoading(true)
+    setCreateResult(null)
+    const t0 = performance.now()
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      const res = await fetch(`${API_URL}/bots`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      })
+      const latency = Math.round(performance.now() - t0)
+      let text = ''
+      try { text = JSON.stringify(await res.json(), null, 2) } catch { text = await res.text() }
+      setCreateResult({ status: res.status, latency, body: text })
+    } catch (e) {
+      const latency = Math.round(performance.now() - t0)
+      setCreateResult({ status: null, latency, body: '', error: e instanceof Error ? e.message : String(e) })
+    }
+    setLoading(false)
+  }
+
+  async function sendList() {
+    setListLoading(true)
+    setListResult(null)
+    const t0 = performance.now()
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      const res = await fetch(`${API_URL}/bots?limit=20&offset=0`, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      })
+      const latency = Math.round(performance.now() - t0)
+      let text = ''
+      try { text = JSON.stringify(await res.json(), null, 2) } catch { text = await res.text() }
+      setListResult({ status: res.status, latency, body: text })
+    } catch (e) {
+      const latency = Math.round(performance.now() - t0)
+      setListResult({ status: null, latency, body: String(e) })
+    }
+    setListLoading(false)
+  }
+
+  async function deleteBot(id: string) {
+    const { data } = await supabase.auth.getSession()
+    const token = data.session?.access_token
+    const res = await fetch(`${API_URL}/bots/${id}`, {
+      method: 'DELETE',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    let text = ''
+    try { text = JSON.stringify(await res.json(), null, 2) } catch { text = await res.text() }
+    setDeleteResult({ id, status: res.status, body: text })
+    void sendList()
+  }
+
+  // Parse bot list from listResult for the table view
+  let botList: Array<Record<string, unknown>> = []
+  if (listResult?.body) {
+    try {
+      const parsed = JSON.parse(listResult.body) as { bots?: Array<Record<string, unknown>> }
+      botList = parsed.bots ?? []
+    } catch { /* ignore */ }
+  }
+
+  const payload = buildPayload()
+
+  return (
+    <Section title="Bots Diagnose">
+      {/* ── Create Form ── */}
+      <div className="mt-2 space-y-4">
+        <p className="text-xs text-slate-400">
+          Erstelle einen Testbot direkt aus dem Debug Panel — zeigt Request, Response und Fehlerdetails.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* Name */}
+          <div className="col-span-2 sm:col-span-1">
+            <label className="block text-[11px] text-slate-500 mb-1">Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Type */}
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">Typ</label>
+            <select
+              value={botType}
+              onChange={(e) => onTypeChange(e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white"
+            >
+              {['rule_based', 'copy_trading', 'ml', 'custom'].map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Trading Pair */}
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">Trading Pair</label>
+            <input
+              value={tradingPair}
+              onChange={(e) => setTradingPair(e.target.value)}
+              placeholder="BTC/USDT:USDT"
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Virtual Balance */}
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">Virtual Balance</label>
+            <input
+              type="number"
+              value={virtualBalance}
+              onChange={(e) => setVirtualBalance(Number(e.target.value))}
+              className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Config JSON */}
+          <div className="col-span-2">
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] text-slate-500">Config (JSON) — Pflichtfelder für <span className="text-yellow-400">{botType}</span>: {JSON.stringify(Object.keys(BOT_TEMPLATES[botType] ?? {}))}</label>
+            </div>
+            <textarea
+              value={configJson}
+              onChange={(e) => { setConfigJson(e.target.value); setConfigError('') }}
+              rows={3}
+              className={`w-full bg-slate-950 border rounded px-3 py-2 text-xs font-mono text-slate-300 focus:outline-none resize-y ${configError ? 'border-red-500' : 'border-slate-700 focus:border-blue-500'}`}
+            />
+            {configError && <p className="text-red-400 text-[11px] mt-1">{configError}</p>}
+          </div>
+        </div>
+
+        {/* Payload Preview */}
+        {payload && (
+          <div>
+            <p className="text-[11px] text-slate-500 mb-1">Payload Preview (wird genau so gesendet):</p>
+            <pre
+              className="bg-slate-950 rounded px-3 py-2 text-[11px] font-mono overflow-auto max-h-32 leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: highlightJson(JSON.stringify(payload, null, 2)) }}
+            />
+          </div>
+        )}
+
+        <button
+          onClick={sendCreate}
+          disabled={loading || !API_URL}
+          className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          {loading ? 'Sende POST /bots…' : 'Bot erstellen (POST /bots)'}
+        </button>
+
+        {/* Create Result */}
+        {createResult && (
+          <div className="bg-slate-950 rounded-lg overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-800 text-xs">
+              <span className={statusColor(createResult.status)}>
+                {createResult.status ?? 'Network Error'}
+              </span>
+              <span className="text-slate-500">{createResult.latency}ms</span>
+              {createResult.status === 500 && (
+                <span className="text-red-400 font-medium">⚠️ Backend-Fehler — sieh Railway Logs</span>
+              )}
+              {createResult.status === 422 && (
+                <span className="text-yellow-400 font-medium">Validierungsfehler (422)</span>
+              )}
+              {createResult.status === 201 && (
+                <span className="text-green-400 font-medium">✅ Bot erstellt!</span>
+              )}
+            </div>
+            {createResult.error ? (
+              <p className="px-4 py-3 text-red-400 text-xs font-mono">{createResult.error}</p>
+            ) : (
+              <pre
+                className="px-4 py-3 text-xs font-mono overflow-auto max-h-48 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: highlightJson(createResult.body) }}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Bot List ── */}
+        <div className="border-t border-slate-700 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-slate-400">Bot-Liste (GET /bots)</p>
+            <button
+              onClick={sendList}
+              disabled={listLoading}
+              className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            >
+              {listLoading ? 'Lädt…' : 'Liste aktualisieren'}
+            </button>
+          </div>
+
+          {listResult && (
+            <>
+              <div className="flex items-center gap-2 mb-2 text-xs">
+                <span className={statusColor(listResult.status)}>{listResult.status}</span>
+                <span className="text-slate-500">{listResult.latency}ms</span>
+                {botList.length > 0 && (
+                  <span className="text-slate-500">{botList.length} Bot(s) gefunden</span>
+                )}
+              </div>
+
+              {botList.length > 0 ? (
+                <div className="space-y-2">
+                  {botList.map((bot) => {
+                    const id = String(bot.id ?? '')
+                    return (
+                      <div key={id} className="bg-slate-900 rounded-lg p-3 text-xs font-mono">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-white font-semibold text-sm">{String(bot.name)}</span>
+                              <span className="text-slate-500 text-[10px] px-1.5 py-0.5 bg-slate-800 rounded">{String(bot.type)}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${bot.status === 'running' ? 'bg-green-900 text-green-400' : bot.status === 'paused' ? 'bg-yellow-900 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
+                                {String(bot.status)}
+                              </span>
+                            </div>
+                            <div className="text-slate-500 break-all">
+                              <span className="text-slate-600">id: </span>
+                              <span className="text-slate-400 select-all">{id}</span>
+                            </div>
+                            <div className="text-slate-500">
+                              <span className="text-slate-600">pair: </span>{String(bot.trading_pair)}
+                              <span className="ml-3 text-slate-600">balance: </span>{String(bot.virtual_balance)}
+                              <span className="ml-3 text-slate-600">config: </span>
+                              <span className="text-slate-400">{JSON.stringify(bot.config)}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => { void deleteBot(id) }}
+                            className="shrink-0 text-[11px] bg-red-900/40 hover:bg-red-900/70 text-red-400 px-2 py-1 rounded transition-colors"
+                            title="Bot löschen"
+                          >
+                            Löschen
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : listResult.status === 200 ? (
+                <p className="text-slate-600 text-xs py-2">Keine Bots vorhanden.</p>
+              ) : (
+                <pre
+                  className="bg-slate-950 rounded px-3 py-2 text-[11px] font-mono overflow-auto max-h-32"
+                  dangerouslySetInnerHTML={{ __html: highlightJson(listResult.body) }}
+                />
+              )}
+            </>
+          )}
+
+          {deleteResult && (
+            <div className={`mt-2 text-xs px-3 py-2 rounded ${deleteResult.status === 200 ? 'bg-green-900/20 text-green-400' : 'bg-red-900/20 text-red-400'}`}>
+              DELETE {deleteResult.id.slice(0, 8)}… → {deleteResult.status} {deleteResult.body}
+            </div>
+          )}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 // ─── Main Debug Page ──────────────────────────────────────────────────────────
 export function DebugPage() {
   const [, forceUpdate] = useState(0)
@@ -629,6 +957,7 @@ export function DebugPage() {
           <EnvSection />
           <ConnectionSection />
           <AuthSection />
+          <BotsDiagnoseSection />
           <RequestLogSection onClear={() => forceUpdate((n) => n + 1)} />
           <EndpointTester />
         </div>

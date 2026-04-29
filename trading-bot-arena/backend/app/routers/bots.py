@@ -119,6 +119,12 @@ def create_bot(
     }
 
     resp = client.table("bots").insert(insert_data).execute()
+    if not resp.data:
+        logger.error(
+            "Bot insert returned no data",
+            extra={"user_id": user_id, "insert_data": insert_data},
+        )
+        raise HTTPException(status_code=500, detail="Bot creation failed — Supabase returned no data")
     row = resp.data[0]
 
     logger.info(

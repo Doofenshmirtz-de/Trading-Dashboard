@@ -10,6 +10,10 @@ import type {
   CreateBotRequest,
   UpdateBotRequest,
   ApiError,
+  PaginatedTrades,
+  SnapshotsResponse,
+  SignalsResponse,
+  BotPerformance,
 } from '../types'
 
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -206,4 +210,27 @@ export function updateBot(id: string, data: Partial<UpdateBotRequest>): Promise<
 
 export async function deleteBot(id: string): Promise<void> {
   await apiFetch<void>(`/bots/${id}`, { method: 'DELETE' })
+}
+
+// ── Phase 3: Sandbox analytics ────────────────────────────────────────────────
+
+export function fetchBotTrades(botId: string, limit = 50, offset = 0): Promise<PaginatedTrades> {
+  return apiFetch<PaginatedTrades>(`/bots/${botId}/trades?limit=${limit}&offset=${offset}`)
+}
+
+export function fetchBotSnapshots(
+  botId: string,
+  limit = 720,
+  resolution = '1h',
+): Promise<SnapshotsResponse> {
+  const params = new URLSearchParams({ limit: String(limit), resolution })
+  return apiFetch<SnapshotsResponse>(`/bots/${botId}/snapshots?${params}`)
+}
+
+export function fetchBotSignals(botId: string, limit = 100): Promise<SignalsResponse> {
+  return apiFetch<SignalsResponse>(`/bots/${botId}/signals?limit=${limit}`)
+}
+
+export function fetchBotPerformance(botId: string): Promise<BotPerformance> {
+  return apiFetch<BotPerformance>(`/bots/${botId}/performance`)
 }

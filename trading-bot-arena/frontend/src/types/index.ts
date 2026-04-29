@@ -83,3 +83,78 @@ export interface ApiError {
   status: number
   message: string
 }
+
+// ── Phase 3: Sandbox Engine types ─────────────────────────────────────────────
+
+export type TradeAction = 'buy' | 'sell'
+export type SignalAction = 'buy' | 'sell' | 'hold'
+
+export interface Trade {
+  id: string
+  bot_id: string
+  user_id: string
+  action: TradeAction
+  price: number
+  quantity: number
+  value_usdt: number
+  fee_usdt: number
+  pnl_usdt: number | null
+  pnl_pct: number | null
+  signal_reason: string | null
+  confidence: number | null
+  candle_timestamp: number | null
+  created_at: string
+}
+
+export interface PaginatedTrades {
+  trades: Trade[]
+  total: number
+}
+
+export interface Snapshot {
+  id: string
+  bot_id: string
+  timestamp: string
+  virtual_balance: number
+  position_value: number
+  total_value: number
+  pnl_pct: number
+  btc_price: number | null
+}
+
+export interface SnapshotsResponse {
+  snapshots: Snapshot[]
+  bot: Bot
+}
+
+export interface BotSignal {
+  id: string
+  bot_id: string
+  timestamp: string
+  action: SignalAction
+  confidence: number
+  reason: string
+  candle_close: number | null
+  rsi_value: number | null
+}
+
+export interface SignalsResponse {
+  signals: BotSignal[]
+  total: number
+}
+
+export interface BotPerformance {
+  total_trades: number
+  winning_trades: number
+  losing_trades: number
+  win_rate: number
+  total_pnl_usdt: number
+  total_pnl_pct: number
+  best_trade_pct: number
+  worst_trade_pct: number
+  avg_trade_pct: number
+  max_drawdown_pct: number
+  sharpe_ratio: number
+  current_position: Record<string, unknown> | null
+  days_running: number
+}

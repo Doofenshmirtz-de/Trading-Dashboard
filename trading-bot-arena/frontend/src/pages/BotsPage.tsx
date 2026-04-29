@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchBots, createBot, updateBot, deleteBot } from '../lib/api'
 import { StatusBadge } from '../components/ui/StatusBadge'
@@ -25,16 +26,24 @@ function getNextAction(
   return null
 }
 
+const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
+  rule_based: { indicator: 'RSI', timeframe: '1h', period: 14, oversold: 30, overbought: 70 },
+  copy_trading: { trader_id: '' },
+  ml: { model_name: '' },
+  custom: {},
+}
+
 const EMPTY_FORM: CreateBotRequest = {
   name: '',
   type: 'rule_based',
-  config: { indicator: 'RSI', timeframe: '1h' },
+  config: DEFAULT_CONFIGS.rule_based,
   virtual_balance: 10000,
   initial_balance: 10000,
   trading_pair: 'BTC/USDT:USDT',
 }
 
 export function BotsPage() {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const { show } = useToast()
   const [page, setPage] = useState(0)
@@ -143,13 +152,7 @@ export function BotsPage() {
                     value={form.type}
                     onChange={(e) => {
                       const t = e.target.value as CreateBotRequest['type']
-                      const defaultConfigs: Record<string, Record<string, string>> = {
-                        rule_based: { indicator: 'RSI', timeframe: '1h' },
-                        copy_trading: { trader_id: '' },
-                        ml: { model_name: '' },
-                        custom: {},
-                      }
-                      setForm({ ...form, type: t, config: defaultConfigs[t] })
+                      setForm({ ...form, type: t, config: DEFAULT_CONFIGS[t] ?? {} })
                     }}
                     className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
                   >
@@ -246,10 +249,17 @@ export function BotsPage() {
                     return (
                       <tr key={bot.id} className="hover:bg-slate-700/50 transition-colors">
                         <td className="px-5 py-4">
-                          <p className="text-white font-medium">{bot.name}</p>
-                          <p className="text-slate-500 text-xs mt-0.5">
-                            ${bot.virtual_balance.toLocaleString()}
-                          </p>
+                          <button
+                            onClick={() => navigate(`/bots/${bot.id}`)}
+                            className="text-left group"
+                          >
+                            <p className="text-white font-medium group-hover:text-blue-400 transition-colors">
+                              {bot.name}
+                            </p>
+                            <p className="text-slate-500 text-xs mt-0.5">
+                              ${bot.virtual_balance.toLocaleString()}
+                            </p>
+                          </button>
                         </td>
                         <td className="px-5 py-4 text-slate-400 hidden sm:table-cell">
                           {bot.type.replace('_', ' ')}

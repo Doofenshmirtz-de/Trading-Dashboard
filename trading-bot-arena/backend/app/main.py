@@ -1,16 +1,19 @@
 # KNOWN LIMITATIONS — MVP
 # TODO Phase 3: Replace in-memory pair cache with Redis
 # TODO Phase 3: Replace REST ticker polling with WebSocket streaming
-# TODO Phase 3: Replace raw JSONB config with typed per-bot-type schemas
-# TODO Phase 3: Add cursor-based pagination for bots and pairs
-# TODO Phase 4: Add Celery worker for background bot execution
-# TODO Phase 4: Add virtual portfolio engine with slippage simulation
+# TODO Phase 4: Replace APScheduler with Celery + Redis workers
+#   - Railway free tier may pause container → APScheduler jobs stop
+#   - Multiple Railway instances = duplicate ticks (no distributed lock)
+#   - max_instances=1 prevents overlap on a single instance only
+# TODO Phase 4: Add distributed lock (Redis/Supabase advisory locks) for multi-instance safety
+# TODO Phase 4: WebSocket/SSE for real-time signal push to frontend
 
 import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
 from app.core.logging import setup_logging, get_logger
@@ -21,6 +24,7 @@ from app.core.exceptions import (
     UnauthorizedError,
 )
 from app.routers import health, bots, market
+from app.services.bot_runner import bot_runner, TIMEFRAME_SECONDS
 
 setup_logging()
 logger = get_logger()
@@ -32,7 +36,27 @@ async def lifespan(app: FastAPI):
         "Trading Bot Arena API starting",
         extra={"environment": settings.ENVIRONMENT},
     )
+
+    # Load all bots that were running before restart
+    await bot_runner.load_running_bots()
+
+    # One scheduler job per timeframe — fires exactly on the candle boundary
+    scheduler = AsyncIOScheduler()
+    for tf, seconds in TIMEFRAME_SECONDS.items():
+        scheduler.add_job(
+            bot_runner.tick_timeframe,
+            "interval",
+            seconds=seconds,
+            args=[tf],
+            id=f"tick_{tf}",
+            max_instances=1,  # prevents overlap if a tick takes longer than interval
+        )
+    scheduler.start()
+    logger.info("Scheduler started", extra={"jobs": list(TIMEFRAME_SECONDS.keys())})
+
     yield
+
+    scheduler.shutdown(wait=False)
     logger.info("Trading Bot Arena API shutting down")
 
 

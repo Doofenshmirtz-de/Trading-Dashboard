@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard'
 import { BotsPage } from './pages/BotsPage'
 import { MarketsPage } from './pages/MarketsPage'
 import { DebugPage } from './pages/DebugPage'
+import { BotDetail } from './pages/BotDetail'
 import { useAuth } from './context/AuthContext'
 
 function RootLayout() {
@@ -36,6 +37,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/bots" element={<BotsPage />} />
+            <Route path="/bots/:id" element={<BotDetail />} />
             <Route path="/markets" element={<MarketsPage />} />
             <Route path="/debug" element={<DebugPage />} />
           </Route>

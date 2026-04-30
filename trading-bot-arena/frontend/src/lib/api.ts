@@ -234,3 +234,27 @@ export function fetchBotSignals(botId: string, limit = 100): Promise<SignalsResp
 export function fetchBotPerformance(botId: string): Promise<BotPerformance> {
   return apiFetch<BotPerformance>(`/bots/${botId}/performance`)
 }
+
+// ── Phase 3: Market Regime ───────────────────────────────────────────────────
+
+export interface MarketRegimeResponse {
+  regime: 'TRENDING_UP' | 'TRENDING_DOWN' | 'RANGING' | 'HIGH_VOLATILITY' | 'UNKNOWN'
+  pair: string
+  timeframe: string
+  timestamp: number
+  indicators: {
+    adx: number | null
+    bb_width_pct: number | null
+    sma_slope: number | null
+    plus_di: number | null
+    minus_di: number | null
+  }
+}
+
+export function fetchMarketRegime(
+  symbol = 'BTC/USDT:USDT',
+  timeframe = '1h',
+): Promise<MarketRegimeResponse> {
+  const params = new URLSearchParams({ symbol, timeframe })
+  return apiFetch<MarketRegimeResponse>(`/market/regime?${params}`)
+}

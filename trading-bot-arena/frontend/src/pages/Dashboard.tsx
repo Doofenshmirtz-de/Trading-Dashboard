@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { fetchBots } from '../lib/api'
 import { SystemStatus } from '../components/ui/SystemStatus'
 import { StatusBadge } from '../components/ui/StatusBadge'
+import RegimeWidget from '../components/market/RegimeWidget'
 
 export function Dashboard() {
   const { user } = useAuth()
@@ -116,7 +117,11 @@ export function Dashboard() {
           </div>
 
           {/* Sidebar */}
-          <aside className="hidden lg:block w-64 shrink-0">
+          <aside className="hidden lg:block w-80 shrink-0 space-y-4">
+            <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+              <h3 className="text-white font-semibold text-sm mb-4">Market Regime</h3>
+              <RegimeWidget symbol="BTC/USDT:USDT" timeframe="1h" />
+            </div>
             <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
               <h3 className="text-white font-semibold text-sm mb-4">System</h3>
               <SystemStatus />

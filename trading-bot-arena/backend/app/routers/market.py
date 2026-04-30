@@ -70,3 +70,89 @@ async def get_ticker(
         },
     )
     return ticker
+
+
+# ── Market Regime Endpoint ────────────────────────────────────────────────────
+
+# Simples In-Memory Cache für Regime-Daten (TTL: 60 Sekunden)
+_regime_cache: dict = {}
+REGIME_CACHE_TTL_SECONDS = 60
+
+
+@router.get("/regime")
+async def get_market_regime(
+    symbol: str = Query(default="BTC/USDT:USDT"),
+    timeframe: str = Query(default="1h"),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Get current market regime classification for a trading pair.
+    
+    Regimes:
+    - TRENDING_UP: Strong uptrend (ADX > 25, price above SMA)
+    - TRENDING_DOWN: Strong downtrend (ADX > 25, price below SMA)
+    - RANGING: Low volatility, sideways (ADX < 20)
+    - HIGH_VOLATILITY: Extreme volatility (BB Width > 10%)
+    - UNKNOWN: Error fallback
+    
+    Cached for 60 seconds to reduce API load.
+    """
+    from app.services.regime_service import regime_service
+    import time
+    
+    # Cache Key
+    cache_key = f"{symbol}:{timeframe}"
+    now = time.time()
+    
+    # Prüfe Cache
+    if cache_key in _regime_cache:
+        cached = _regime_cache[cache_key]
+        if now - cached["cached_at"] < REGIME_CACHE_TTL_SECONDS:
+            logger.info(
+                "Market regime served from cache",
+                extra={
+                    "user_id": current_user["user_id"],
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "regime": cached["data"]["regime"],
+                },
+            )
+            return cached["data"]
+    
+    # Berechne frisches Regime
+    t0 = time.time()
+    result = await regime_service.detect_regime(symbol, timeframe)
+    latency = int((time.time() - t0) * 1000)
+    
+    response = {
+        "regime": result.regime.value,
+        "pair": result.pair,
+        "timeframe": result.timeframe,
+        "timestamp": result.timestamp,
+        "indicators": {
+            "adx": result.adx,
+            "bb_width_pct": result.bb_width_pct,
+            "sma_slope": result.sma_slope,
+            "plus_di": result.plus_di,
+            "minus_di": result.minus_di,
+        },
+    }
+    
+    # Speichere im Cache
+    _regime_cache[cache_key] = {
+        "data": response,
+        "cached_at": now,
+    }
+    
+    logger.info(
+        "Market regime calculated",
+        extra={
+            "user_id": current_user["user_id"],
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "regime": result.regime.value,
+            "latency_ms": latency,
+        },
+    )
+    
+    return response

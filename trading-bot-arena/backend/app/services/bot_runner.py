@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 import jsonschema
 
 from app.core.bot_base import Candle
+from app.core.bots import BotFactory
 from app.core.bots.rsi_bot import RSIBot
 from app.core.portfolio_engine import VirtualPortfolioEngine
 from app.services.binance import get_candles
@@ -41,9 +42,23 @@ TIMEFRAME_SECONDS: dict[str, int] = {
 
 
 def _make_bot(bot_type: str, bot_id: str, config: dict, virtual_balance: float):
-    """Instantiate the correct bot class from the bot_record type string."""
+    """
+    Instantiate the correct bot class from the bot_record type string.
+    
+    Uses BotFactory for rule_based bots, supporting RSI, MACD, BOLLINGER.
+    """
     if bot_type == "rule_based":
-        return RSIBot(bot_id, config, virtual_balance)
+        indicator = config.get("indicator", "RSI")
+        try:
+            return BotFactory.create(
+                indicator=indicator,
+                bot_id=bot_id,
+                config=config,
+                virtual_balance=virtual_balance,
+            )
+        except ValueError as e:
+            raise ValueError(f"Unsupported indicator: {indicator}. "
+                           f"Available: {BotFactory.list_available()}") from e
     # TODO Phase 4: Add copy_trading, ml, custom bot types
     raise ValueError(f"Unsupported bot type for sandbox execution: {bot_type!r}")
 
@@ -133,9 +148,14 @@ class BotRunner:
         # Reconstruct open position from trade history
         await self._reconstruct_position(bot_id, engine, initial_balance)
 
-        # Warm up RSI with historical candles (feed without executing trades)
-        period = int(config.get("period", 14))
-        warmup_count = period + 2  # one extra for safety
+        # Warm up bot with historical candles (feed without executing trades)
+        # Dynamische Warm-up Berechnung basierend auf Indikator
+        indicator = config.get("indicator", "RSI")
+        try:
+            warmup_count = BotFactory.get_warmup_count(indicator, config)
+        except ValueError:
+            warmup_count = 35  # Safe default for unknown indicators (26 + 9)
+        warmup_count += 2  # one extra for safety
         try:
             raw_candles = await get_candles(pair, timeframe, warmup_count)
             for row in raw_candles:
@@ -233,13 +253,37 @@ class BotRunner:
         # Feed candle to bot
         signal = bot.on_candle(candle)
 
+        # Extrahiere Indikator-Werte für erweiterte Analyse
         rsi_value: float | None = None
-        if hasattr(bot, "last_rsi"):
-            rsi_value = bot.last_rsi  # type: ignore[attr-defined]
+        macd_value: float | None = None
+        bb_upper: float | None = None
+        bb_lower: float | None = None
+        bb_position: str | None = None  # "above_upper", "below_lower", "within"
+        
+        if isinstance(bot, RSIBot) and hasattr(bot, "last_rsi"):
+            rsi_value = bot.last_rsi
+        elif hasattr(bot, "last_macd") and hasattr(bot, "last_signal"):
+            # MACD Bot
+            macd_value = bot.last_macd
+        elif hasattr(bot, "last_lower") and hasattr(bot, "last_upper"):
+            # Bollinger Bot
+            bb_lower = bot.last_lower
+            bb_upper = bot.last_upper
+            bb_middle = bot.last_middle if hasattr(bot, "last_middle") else None
+            if bb_lower is not None and bb_upper is not None:
+                if candle.close < bb_lower:
+                    bb_position = "below_lower"
+                elif candle.close > bb_upper:
+                    bb_position = "above_upper"
+                else:
+                    bb_position = "within"
 
         # Save signal (always, even hold)
         if signal is not None:
-            await self._save_signal(bot_id, signal, candle, rsi_value)
+            await self._save_signal(
+                bot_id, signal, candle, rsi_value, macd_value,
+                bb_lower, bb_upper, bb_position
+            )
 
             if signal.action in ("buy", "sell"):
                 trade = engine.execute(signal, candle, user_id)
@@ -251,10 +295,21 @@ class BotRunner:
         # Save performance snapshot
         await self._save_snapshot(bot_id, engine, initial_balance, current_price)
 
+        # Logging mit Indikator-Info
         action = signal.action if signal else "none"
-        rsi_text = f"{rsi_value:.1f}" if rsi_value is not None else "n/a"
+        indicator_name = config.get("indicator", "RSI")
+        
+        if rsi_value is not None:
+            indicator_text = f"RSI={rsi_value:.1f}"
+        elif macd_value is not None:
+            indicator_text = f"MACD={macd_value:.2f}"
+        elif bb_lower is not None:
+            indicator_text = f"BB: {bb_lower:.0f} - {bb_upper:.0f}"
+        else:
+            indicator_text = "n/a"
+            
         logger.info(
-            f"Tick [{timeframe}]: {bot_name} | RSI={rsi_text} | "
+            f"Tick [{timeframe}]: {bot_name} | {indicator_text} | "
             f"Signal={action} | Balance={engine.balance:.2f}"
         )
 
@@ -287,10 +342,19 @@ class BotRunner:
             )
 
     async def _save_signal(
-        self, bot_id: str, signal, candle: Candle, rsi_value: float | None
+        self,
+        bot_id: str,
+        signal,
+        candle: Candle,
+        rsi_value: float | None = None,
+        macd_value: float | None = None,
+        bb_lower: float | None = None,
+        bb_upper: float | None = None,
+        bb_position: str | None = None,
     ) -> None:
         client = get_supabase_client()
-        client.table("bot_signals").insert({
+        
+        payload = {
             "bot_id": bot_id,
             "timestamp": datetime.fromtimestamp(candle.timestamp / 1000, tz=timezone.utc).isoformat(),
             "action": signal.action,
@@ -298,7 +362,16 @@ class BotRunner:
             "reason": signal.reason,
             "candle_close": candle.close,
             "rsi_value": rsi_value,
-        }).execute()
+            "macd_value": macd_value,
+            "bb_lower": bb_lower,
+            "bb_upper": bb_upper,
+            "bb_position": bb_position,
+        }
+        
+        # Entferne None-Werte bevor Insert (für Rückwärtskompatibilität)
+        payload = {k: v for k, v in payload.items() if v is not None}
+        
+        client.table("bot_signals").insert(payload).execute()
 
     async def _save_trade(self, trade: dict) -> None:
         client = get_supabase_client()

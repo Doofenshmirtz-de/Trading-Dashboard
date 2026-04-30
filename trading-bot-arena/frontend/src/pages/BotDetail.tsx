@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  AreaChart,
+  ComposedChart,
   Area,
   XAxis,
   YAxis,
@@ -12,6 +12,7 @@ import {
   Tooltip,
   ReferenceLine,
   ResponsiveContainer,
+  Scatter,
 } from 'recharts'
 import {
   fetchBotPerformance,
@@ -88,20 +89,6 @@ function StatCard({
   )
 }
 
-// ── Custom Tooltip ─────────────────────────────────────────────────────────────
-
-function EquityTooltip({ active, payload, label }: { active?: boolean; payload?: {value: number}[]; label?: string }) {
-  if (!active || !payload?.length) return null
-  const pnl = payload[0]?.value
-  return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs">
-      <p className="text-slate-400 mb-1">{label ?? ''}</p>
-      <p className={`font-semibold ${pnlColour(pnl)}`}>
-        {pnl >= 0 ? '+' : ''}{fmtPrice(pnl)} USDT total
-      </p>
-    </div>
-  )
-}
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
@@ -147,15 +134,51 @@ export function BotDetail() {
   const trades = tradesQuery.data?.trades ?? []
   const signals = signalsQuery.data?.signals ?? []
 
-  const chartData = useMemo(
-    () =>
-      snapshots.map((s) => ({
-        time: fmtDate(s.timestamp),
-        value: s.total_value,
-        pnl_pct: s.pnl_pct,
-      })),
-    [snapshots],
-  )
+  // Chart-Daten mit Trade-Markern vorbereiten
+  const chartData = useMemo(() => {
+    // Snapshots als Basis
+    const baseData = snapshots.map((s) => ({
+      time: fmtDate(s.timestamp),
+      timestamp: s.timestamp,
+      value: s.total_value,
+      pnl_pct: s.pnl_pct,
+      tradeAction: null as 'buy' | 'sell' | null,
+      tradePrice: null as number | null,
+    }))
+
+    // Trades als Marker hinzufügen (nur wenn naher Snapshot existiert, sonst als separates Item)
+    const tradeMarkers = trades
+      .filter((t) => t.action === 'buy' || t.action === 'sell')
+      .map((t) => ({
+        time: fmtDate(t.created_at),
+        timestamp: t.created_at,
+        value: null as number | null,
+        pnl_pct: null as number | null,
+        tradeAction: t.action as 'buy' | 'sell',
+        tradePrice: t.price,
+      }))
+
+    // Kombinieren und sortieren
+    const combined = [...baseData, ...tradeMarkers].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    )
+
+    return combined
+  }, [snapshots, trades])
+
+  // Y-Achsen-Domain berechnen (mit Padding um Schwankungen sichtbar zu machen)
+  const yDomain = useMemo(() => {
+    if (chartData.length === 0) return ['auto', 'auto'] as const
+    const values = chartData.filter((d) => d.value != null).map((d) => d.value!)
+    if (values.length === 0) return ['auto', 'auto'] as const
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const initial = bot?.initial_balance ?? 10000
+    // Domain erweitern, um Initial-Balance zu zeigen und Padding für Sichtbarkeit
+    const domainMin = Math.min(min, initial) * 0.995 // 0.5% unter Minimum
+    const domainMax = Math.max(max, initial) * 1.005 // 0.5% über Maximum
+    return [domainMin, domainMax] as const
+  }, [chartData, bot?.initial_balance])
 
   const lastPnlPct = snapshots.length ? snapshots[snapshots.length - 1].pnl_pct : 0
   const chartColour = lastPnlPct >= 0 ? '#22c55e' : '#ef4444'
@@ -347,36 +370,86 @@ export function BotDetail() {
 
         {/* Equity Curve */}
         <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-          <h2 className="text-white font-semibold mb-4">Equity Curve</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white font-semibold">Equity Curve</h2>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="flex items-center gap-1 text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-green-500" /> BUY
+              </span>
+              <span className="flex items-center gap-1 text-slate-400">
+                <span className="w-2 h-2 rounded-full bg-red-500" /> SELL
+              </span>
+              <span className="text-slate-500">
+                Start: ${fmtPrice(bot?.initial_balance)}
+              </span>
+            </div>
+          </div>
           {chartData.length < 2 ? (
-            <div className="h-48 flex items-center justify-center text-slate-500 text-sm">
+            <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
               Not enough data yet — bot needs to run for at least 2 intervals
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={280}>
+              <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chartColour} stopOpacity={0.3} />
+                    <stop offset="0%" stopColor={chartColour} stopOpacity={0.25} />
                     <stop offset="100%" stopColor={chartColour} stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                 <XAxis
                   dataKey="time"
-                  tick={{ fill: '#94a3b8', fontSize: 11 }}
+                  tick={{ fill: '#94a3b8', fontSize: 10 }}
                   interval="preserveStartEnd"
                   tickLine={false}
+                  axisLine={{ stroke: '#334155' }}
+                  minTickGap={30}
                 />
                 <YAxis
-                  tick={{ fill: '#94a3b8', fontSize: 11 }}
+                  domain={yDomain}
+                  tick={{ fill: '#94a3b8', fontSize: 10 }}
                   tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) => `$${v.toLocaleString()}`}
-                  width={72}
+                  axisLine={{ stroke: '#334155' }}
+                  tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`}
+                  width={50}
                 />
-                <Tooltip content={<EquityTooltip />} />
-                <ReferenceLine y={bot?.initial_balance ?? 0} stroke="#64748b" strokeDasharray="4 2" />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const p = payload[0]?.payload as typeof chartData[0] | undefined
+                    if (!p) return null
+                    return (
+                      <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-lg">
+                        <p className="text-slate-400 mb-1">{label}</p>
+                        {p.value != null && (
+                          <p className={`font-semibold ${pnlColour(p.pnl_pct)}`}>
+                            ${fmtPrice(p.value)} ({p.pnl_pct != null ? `${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%` : '—'})
+                          </p>
+                        )}
+                        {p.tradeAction && (
+                          <p className={`mt-1 font-medium ${p.tradeAction === 'buy' ? 'text-green-400' : 'text-red-400'}`}>
+                            {p.tradeAction.toUpperCase()} @ ${fmtPrice(p.tradePrice)}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  }}
+                />
+                {/* Startwert Referenzlinie */}
+                <ReferenceLine
+                  y={bot?.initial_balance ?? 0}
+                  stroke="#64748b"
+                  strokeDasharray="5 5"
+                  strokeWidth={1}
+                  label={{
+                    value: `Start $${fmtPrice(bot?.initial_balance)}`,
+                    fill: '#94a3b8',
+                    fontSize: 10,
+                    position: 'insideTopRight',
+                  }}
+                />
+                {/* Equity Area */}
                 <Area
                   type="monotone"
                   dataKey="value"
@@ -384,9 +457,48 @@ export function BotDetail() {
                   strokeWidth={2}
                   fill="url(#equityGradient)"
                   dot={false}
-                  activeDot={{ r: 4, fill: chartColour }}
+                  activeDot={{ r: 5, strokeWidth: 0, fill: chartColour }}
+                  connectNulls={false}
                 />
-              </AreaChart>
+                {/* BUY Marker (grüne Dreiecke nach oben) */}
+                <Scatter
+                  dataKey="tradeAction"
+                  data={chartData.filter((d) => d.tradeAction === 'buy')}
+                  fill="#22c55e"
+                  shape={(props: { cx?: number; cy?: number }) => {
+                    const { cx = 0, cy = 0 } = props
+                    return (
+                      <g>
+                        <polygon
+                          points={`${cx},${cy - 8} ${cx - 5},${cy + 2} ${cx + 5},${cy + 2}`}
+                          fill="#22c55e"
+                          stroke="#166534"
+                          strokeWidth={1}
+                        />
+                      </g>
+                    )
+                  }}
+                />
+                {/* SELL Marker (rote Dreiecke nach unten) */}
+                <Scatter
+                  dataKey="tradeAction"
+                  data={chartData.filter((d) => d.tradeAction === 'sell')}
+                  fill="#ef4444"
+                  shape={(props: { cx?: number; cy?: number }) => {
+                    const { cx = 0, cy = 0 } = props
+                    return (
+                      <g>
+                        <polygon
+                          points={`${cx},${cy + 8} ${cx - 5},${cy - 2} ${cx + 5},${cy - 2}`}
+                          fill="#ef4444"
+                          stroke="#991b1b"
+                          strokeWidth={1}
+                        />
+                      </g>
+                    )
+                  }}
+                />
+              </ComposedChart>
             </ResponsiveContainer>
           )}
         </div>

@@ -91,12 +91,12 @@ function IndicatorColumnCell({ signal, botType }: IndicatorColumnCellProps) {
         </td>
       )
     case 'BOLLINGER':
-      const getPositionColor = (pos: string | null) => {
+      const getPositionColor = (pos: string | null | undefined) => {
         if (pos === 'above_upper') return 'text-red-400'
         if (pos === 'below_lower') return 'text-green-400'
         return 'text-slate-400'
       }
-      const getPositionLabel = (pos: string | null) => {
+      const getPositionLabel = (pos: string | null | undefined) => {
         if (pos === 'above_upper') return 'Above Upper'
         if (pos === 'below_lower') return 'Below Lower'
         if (pos === 'within') return 'Within'

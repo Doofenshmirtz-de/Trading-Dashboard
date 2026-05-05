@@ -27,9 +27,9 @@ type MarketRegime =
 
 interface RegimeResponse {
   regime: MarketRegime;
-  pair: string;
-  timeframe: string;
-  timestamp: number;
+  pair?: string;
+  timeframe?: string;
+  timestamp?: number;
   indicators: {
     adx: number | null;
     bb_width_pct: number | null;

@@ -15,6 +15,7 @@ from app.models.bot import (
 )
 from app.core.exceptions import BotNotFoundError, InvalidBotTransitionError
 from app.core.logging import get_logger
+from app.services.regime_service import MarketRegime
 
 router = APIRouter(prefix="/bots", tags=["bots"])
 logger = get_logger()

@@ -14,6 +14,7 @@ import type {
   SnapshotsResponse,
   SignalsResponse,
   BotPerformance,
+  Snapshot,
 } from '../types'
 
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -239,9 +240,11 @@ export function fetchBotPerformance(botId: string): Promise<BotPerformance> {
 
 export interface MarketRegimeResponse {
   regime: 'TRENDING_UP' | 'TRENDING_DOWN' | 'RANGING' | 'HIGH_VOLATILITY' | 'UNKNOWN'
-  pair: string
-  timeframe: string
-  timestamp: number
+  pair?: string
+  timeframe?: string
+  timestamp?: number
+  description?: string
+  recommendation?: string
   indicators: {
     adx: number | null
     bb_width_pct: number | null

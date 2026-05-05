@@ -39,20 +39,6 @@ const BOT_COLORS = [
   '#ec4899', // pink
 ]
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function fmtPrice(n: number | null | undefined) {
-  if (n == null) return '—'
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 function pnlColour(v: number | null | undefined) {
   if (v == null) return 'text-slate-400'
   if (v > 0) return 'text-green-400'
@@ -405,8 +391,8 @@ function CombinedChart({ bots }: CombinedChartProps) {
 interface RegimeCardProps {
   regime: {
     regime: string
-    description: string
-    recommendation: string
+    description?: string
+    recommendation?: string
     indicators: {
       adx: number | null
       bb_width_pct: number | null
@@ -422,6 +408,32 @@ function RegimeCard({ regime }: RegimeCardProps) {
   const icon = getRegimeIcon(regime.regime)
   const label = getRegimeLabel(regime.regime)
 
+  // Fallback descriptions if not provided
+  const getDefaultDescription = (r: string): string => {
+    const descriptions: Record<string, string> = {
+      TRENDING_UP: 'Klarer Aufwärtstrend',
+      TRENDING_DOWN: 'Klarer Abwärtstrend',
+      RANGING: 'Seitwärtsphase (Ranging)',
+      HIGH_VOLATILITY: 'Hohe Volatilität',
+      UNKNOWN: 'Keine Daten verfügbar',
+    }
+    return descriptions[r] || 'Unbekannt'
+  }
+
+  const getDefaultRecommendation = (r: string): string => {
+    const recommendations: Record<string, string> = {
+      TRENDING_UP: 'MACD und Momentum-Bots bevorzugen',
+      TRENDING_DOWN: 'Short-Strategien oder Cash bevorzugen',
+      RANGING: 'Bollinger Bands und Mean-Reversion bevorzugen',
+      HIGH_VOLATILITY: 'Konservative Einstellungen, kleinere Positionen',
+      UNKNOWN: 'Warten auf Marktdaten',
+    }
+    return recommendations[r] || ''
+  }
+
+  const description = regime.description || getDefaultDescription(regime.regime)
+  const recommendation = regime.recommendation || getDefaultRecommendation(regime.regime)
+
   return (
     <div className={`rounded-xl border p-4 ${colorClass}`}>
       <div className="flex items-center justify-between">
@@ -429,12 +441,12 @@ function RegimeCard({ regime }: RegimeCardProps) {
           <span className="text-2xl">{icon}</span>
           <div>
             <h3 className="font-semibold">{label}</h3>
-            <p className="text-xs opacity-80">{regime.description}</p>
+            <p className="text-xs opacity-80">{description}</p>
           </div>
         </div>
         <div className="text-right">
           <p className="text-xs opacity-60">Empfehlung</p>
-          <p className="text-sm">{regime.recommendation}</p>
+          <p className="text-sm">{recommendation}</p>
         </div>
       </div>
 

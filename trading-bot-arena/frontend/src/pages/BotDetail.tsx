@@ -170,7 +170,7 @@ export function BotDetail() {
   const qc = useQueryClient()
   const { show } = useToast()
 
-  const botId = id ?? ''
+  const botId = id || ''
 
   // State to share snapshots between EquityCurve and DrawdownChart
   const [sharedSnapshots, setSharedSnapshots] = useState<Snapshot[]>([])

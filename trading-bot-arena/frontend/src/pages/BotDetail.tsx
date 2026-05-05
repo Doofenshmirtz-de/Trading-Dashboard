@@ -44,6 +44,87 @@ function truncate(s: string, n = 40) {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+// ── Indicator Column Helpers ───────────────────────────────────────────────────
+
+interface IndicatorColumnProps {
+  botType: string
+}
+
+interface IndicatorColumnCellProps extends IndicatorColumnProps {
+  signal: {
+    rsi_value?: number | null
+    macd_value?: number | null
+    bb_lower?: number | null
+    bb_upper?: number | null
+    bb_position?: string | null
+  }
+}
+
+function IndicatorColumnHeader({ botType }: IndicatorColumnProps) {
+  switch (botType) {
+    case 'MACD':
+      return (
+        <th className="text-right px-5 py-3 font-medium">MACD</th>
+      )
+    case 'BOLLINGER':
+      return (
+        <>
+          <th className="text-right px-5 py-3 font-medium hidden sm:table-cell">BB Lower</th>
+          <th className="text-right px-5 py-3 font-medium hidden sm:table-cell">BB Upper</th>
+          <th className="text-left px-5 py-3 font-medium">Position</th>
+        </>
+      )
+    case 'RSI':
+    default:
+      return (
+        <th className="text-right px-5 py-3 font-medium">RSI</th>
+      )
+  }
+}
+
+function IndicatorColumnCell({ signal, botType }: IndicatorColumnCellProps) {
+  switch (botType) {
+    case 'MACD':
+      return (
+        <td className="px-5 py-3 text-right font-mono text-xs text-slate-300">
+          {signal.macd_value != null ? signal.macd_value.toFixed(4) : '—'}
+        </td>
+      )
+    case 'BOLLINGER':
+      const getPositionColor = (pos: string | null) => {
+        if (pos === 'above_upper') return 'text-red-400'
+        if (pos === 'below_lower') return 'text-green-400'
+        return 'text-slate-400'
+      }
+      const getPositionLabel = (pos: string | null) => {
+        if (pos === 'above_upper') return 'Above Upper'
+        if (pos === 'below_lower') return 'Below Lower'
+        if (pos === 'within') return 'Within'
+        return '—'
+      }
+      return (
+        <>
+          <td className="px-5 py-3 text-right font-mono text-xs text-slate-300 hidden sm:table-cell">
+            {signal.bb_lower != null ? signal.bb_lower.toFixed(2) : '—'}
+          </td>
+          <td className="px-5 py-3 text-right font-mono text-xs text-slate-300 hidden sm:table-cell">
+            {signal.bb_upper != null ? signal.bb_upper.toFixed(2) : '—'}
+          </td>
+          <td className={`px-5 py-3 text-xs ${getPositionColor(signal.bb_position)}`}>
+            {getPositionLabel(signal.bb_position)}
+          </td>
+        </>
+      )
+    case 'RSI':
+    default:
+      return (
+        <td className="px-5 py-3 text-right font-mono text-xs text-slate-300">
+          {signal.rsi_value != null ? signal.rsi_value.toFixed(1) : '—'}
+        </td>
+      )
+  }
+}
+
 function fmtDurationSince(iso?: string) {
   if (!iso) return '—'
   const startedAt = new Date(iso).getTime()
@@ -303,9 +384,22 @@ export function BotDetail() {
               <p className="text-xs text-slate-400">Signal / Runner Status</p>
               <div className="bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs text-slate-300 space-y-1">
                 <p>Status: <span className="text-white">{bot?.status ?? '—'}</span></p>
+                <p>Indicator: <span className="text-white">{String(config.indicator ?? 'RSI')}</span></p>
                 <p>Timeframe: <span className="text-white">{String(config.timeframe ?? '—')}</span></p>
-                <p>RSI period: <span className="text-white">{String(config.period ?? '—')}</span></p>
-                <p>Oversold / Overbought: <span className="text-white">{String(config.oversold ?? '—')} / {String(config.overbought ?? '—')}</span></p>
+                {config.indicator === 'MACD' ? (
+                  <>
+                    <p>Fast/Slow/Signal: <span className="text-white">{String(config.fast_period ?? 12)} / {String(config.slow_period ?? 26)} / {String(config.signal_period ?? 9)}</span></p>
+                  </>
+                ) : config.indicator === 'BOLLINGER' ? (
+                  <>
+                    <p>Period/StdDev: <span className="text-white">{String(config.period ?? 20)} / {String(config.std_dev_multiplier ?? 2.0)}σ</span></p>
+                  </>
+                ) : (
+                  <>
+                    <p>RSI period: <span className="text-white">{String(config.period ?? 14)}</span></p>
+                    <p>Oversold / Overbought: <span className="text-white">{String(config.oversold ?? 30)} / {String(config.overbought ?? 70)}</span></p>
+                  </>
+                )}
                 <p>Last Signal: <span className="text-white">{lastSignal ? `${lastSignal.action.toUpperCase()} @ ${fmtDate(lastSignal.timestamp)}` : 'none'}</span></p>
               </div>
               {debugHint && (
@@ -441,7 +535,7 @@ export function BotDetail() {
                   <tr className="text-xs text-slate-400 uppercase tracking-wider">
                     <th className="text-left px-5 py-3 font-medium">Time</th>
                     <th className="text-left px-5 py-3 font-medium">Signal</th>
-                    <th className="text-right px-5 py-3 font-medium">RSI</th>
+                    <IndicatorColumnHeader botType={String(config.indicator ?? 'RSI')} />
                     <th className="text-right px-5 py-3 font-medium hidden sm:table-cell">Confidence</th>
                     <th className="text-left px-5 py-3 font-medium hidden md:table-cell">Reason</th>
                   </tr>
@@ -465,9 +559,7 @@ export function BotDetail() {
                           {sig.action.toUpperCase()}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-right font-mono text-xs text-slate-300">
-                        {sig.rsi_value != null ? sig.rsi_value.toFixed(1) : '—'}
-                      </td>
+                      <IndicatorColumnCell signal={sig} botType={String(config.indicator ?? 'RSI')} />
                       <td className="px-5 py-3 text-right text-slate-400 text-xs hidden sm:table-cell">
                         {(sig.confidence * 100).toFixed(0)}%
                       </td>

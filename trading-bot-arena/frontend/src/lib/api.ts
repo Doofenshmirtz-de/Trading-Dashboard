@@ -258,3 +258,32 @@ export function fetchMarketRegime(
   const params = new URLSearchParams({ symbol, timeframe })
   return apiFetch<MarketRegimeResponse>(`/market/regime?${params}`)
 }
+
+// ── Phase 3: Bot Comparison ──────────────────────────────────────────────────
+
+export interface BotWithPerformance {
+  bot: Bot
+  performance: {
+    total_trades: number
+    winning_trades: number
+    losing_trades: number
+    win_rate: number
+    total_pnl_pct: number
+    indicator: string
+  }
+  latest_snapshot: Snapshot | null
+  regime_fit: {
+    score: number
+    label: string
+    emoji: string
+  }
+}
+
+export interface ComparisonResponse {
+  bots: BotWithPerformance[]
+  regime: MarketRegimeResponse
+}
+
+export function fetchComparison(): Promise<ComparisonResponse> {
+  return apiFetch<ComparisonResponse>('/bots/comparison/all')
+}

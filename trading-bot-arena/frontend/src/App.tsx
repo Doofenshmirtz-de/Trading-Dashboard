@@ -8,6 +8,7 @@ import { BotsPage } from './pages/BotsPage'
 import { MarketsPage } from './pages/MarketsPage'
 import { DebugPage } from './pages/DebugPage'
 import { BotDetail } from './pages/BotDetail'
+import { Comparison } from './pages/dashboard/Comparison'
 import { useAuth } from './context/AuthContext'
 
 function RootLayout() {
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="/signup" element={<SignUp />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/compare" element={<Comparison />} />
             <Route path="/bots" element={<BotsPage />} />
             <Route path="/bots/:id" element={<BotDetail />} />
             <Route path="/markets" element={<MarketsPage />} />

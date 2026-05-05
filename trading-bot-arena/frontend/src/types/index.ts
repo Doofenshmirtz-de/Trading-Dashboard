@@ -136,6 +136,10 @@ export interface BotSignal {
   reason: string
   candle_close: number | null
   rsi_value: number | null
+  macd_value: number | null
+  bb_lower: number | null
+  bb_upper: number | null
+  bb_position: 'above_upper' | 'below_lower' | 'within' | null
 }
 
 export interface SignalsResponse {

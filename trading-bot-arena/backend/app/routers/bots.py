@@ -439,3 +439,175 @@ async def get_bot_performance(
         "current_position": current_position,
         "days_running": round(days_running, 2),
     }
+
+
+# ── Comparison endpoint ───────────────────────────────────────────────────────
+
+@router.get("/comparison/all")
+async def get_bots_comparison(
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Get all bots with their performance data for comparison.
+    
+    Returns combined data in a single request:
+    - All bots for current user
+    - Performance metrics for each bot
+    - Latest snapshot for each bot
+    - Current market regime
+    """
+    import asyncio
+    from app.services.regime_service import regime_service, MarketRegime
+    
+    user_id = current_user["user_id"]
+    client = get_supabase_client()
+    
+    # Fetch all bots for user
+    bots_resp = (
+        client.table("bots")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    bots = bots_resp.data or []
+    
+    if not bots:
+        # Return empty result with regime
+        regime_result = await regime_service.detect_regime("BTC/USDT:USDT", "1h")
+        return {
+            "bots": [],
+            "regime": {
+                "regime": regime_result.regime.value,
+                "indicators": {
+                    "adx": regime_result.adx,
+                    "bb_width_pct": regime_result.bb_width_pct,
+                    "sma_slope": regime_result.sma_slope,
+                    "plus_di": regime_result.plus_di,
+                    "minus_di": regime_result.minus_di,
+                },
+            },
+        }
+    
+    # Helper to fetch performance for a single bot
+    async def fetch_bot_performance_data(bot: dict) -> dict:
+        bot_id = bot["id"]
+        
+        # Fetch trades, snapshots, and signals in parallel
+        trades_future = asyncio.to_thread(
+            lambda: client.table("bot_trades")
+            .select("*")
+            .eq("bot_id", bot_id)
+            .execute()
+        )
+        
+        snapshots_future = asyncio.to_thread(
+            lambda: client.table("bot_snapshots")
+            .select("*")
+            .eq("bot_id", bot_id)
+            .order("timestamp", desc=True)
+            .limit(1)
+            .execute()
+        )
+        
+        trades_result, snapshots_result = await asyncio.gather(
+            trades_future, snapshots_future
+        )
+        
+        trades = trades_result.data or []
+        snapshots = snapshots_result.data or []
+        latest_snapshot = snapshots[0] if snapshots else None
+        
+        # Calculate performance metrics
+        closed_trades = [t for t in trades if t.get("pnl_pct") is not None]
+        pnl_values = [float(t["pnl_pct"]) for t in closed_trades]
+        winning = [p for p in pnl_values if p > 0]
+        
+        # Determine indicator type for regime fit
+        config = bot.get("config") or {}
+        indicator = config.get("indicator", "RSI")
+        
+        # Calculate simple regime fit score
+        # This will be populated after we get the regime
+        
+        return {
+            "bot": _row_to_response(bot).model_dump(),
+            "performance": {
+                "total_trades": len(closed_trades),
+                "winning_trades": len(winning),
+                "losing_trades": len(closed_trades) - len(winning),
+                "win_rate": round(len(winning) / len(closed_trades), 4) if closed_trades else 0.0,
+                "total_pnl_pct": round(sum(pnl_values), 4) if pnl_values else 0.0,
+                "indicator": indicator,
+            },
+            "latest_snapshot": latest_snapshot,
+            "indicator": indicator,
+        }
+    
+    # Fetch regime and bot data in parallel
+    regime_future = regime_service.detect_regime("BTC/USDT:USDT", "1h")
+    bot_data_future = asyncio.gather(*[fetch_bot_performance_data(bot) for bot in bots])
+    
+    regime_result, bot_data_list = await asyncio.gather(regime_future, bot_data_future)
+    
+    # Calculate regime fit for each bot
+    for bot_data in bot_data_list:
+        indicator = bot_data["indicator"]
+        fit_score = regime_service.get_regime_fit_score(regime_result.regime, indicator)
+        
+        # Determine fit label
+        if fit_score >= 70:
+            fit_label = "Passt"
+            fit_emoji = "✅"
+        elif fit_score >= 50:
+            fit_label = "Neutral"
+            fit_emoji = "➖"
+        else:
+            fit_label = "Suboptimal"
+            fit_emoji = "⚠️"
+        
+        bot_data["regime_fit"] = {
+            "score": fit_score,
+            "label": fit_label,
+            "emoji": fit_emoji,
+        }
+        # Remove temporary indicator field
+        del bot_data["indicator"]
+    
+    return {
+        "bots": bot_data_list,
+        "regime": {
+            "regime": regime_result.regime.value,
+            "description": _get_regime_description(regime_result.regime),
+            "recommendation": _get_regime_recommendation(regime_result.regime),
+            "indicators": {
+                "adx": regime_result.adx,
+                "bb_width_pct": regime_result.bb_width_pct,
+                "sma_slope": regime_result.sma_slope,
+                "plus_di": regime_result.plus_di,
+                "minus_di": regime_result.minus_di,
+            },
+        },
+    }
+
+
+def _get_regime_description(regime: MarketRegime) -> str:
+    descriptions = {
+        MarketRegime.TRENDING_UP: "Klarer Aufwärtstrend",
+        MarketRegime.TRENDING_DOWN: "Klarer Abwärtstrend",
+        MarketRegime.RANGING: "Seitwärtsphase (Ranging)",
+        MarketRegime.HIGH_VOLATILITY: "Hohe Volatilität",
+        MarketRegime.UNKNOWN: "Keine Daten verfügbar",
+    }
+    return descriptions.get(regime, "Unbekannt")
+
+
+def _get_regime_recommendation(regime: MarketRegime) -> str:
+    recommendations = {
+        MarketRegime.TRENDING_UP: "MACD und Momentum-Bots bevorzugen",
+        MarketRegime.TRENDING_DOWN: "Short-Strategien oder Cash bevorzugen",
+        MarketRegime.RANGING: "Bollinger Bands und Mean-Reversion bevorzugen",
+        MarketRegime.HIGH_VOLATILITY: "Konservative Einstellungen, kleinere Positionen",
+        MarketRegime.UNKNOWN: "Warten auf Marktdaten",
+    }
+    return recommendations.get(regime, "")

@@ -33,6 +33,31 @@ const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   custom: {},
 }
 
+const RSI_CONFIG = {
+  indicator: 'RSI',
+  timeframe: '1h',
+  period: 14,
+  oversold: 30,
+  overbought: 70,
+}
+
+const MACD_CONFIG = {
+  indicator: 'MACD',
+  timeframe: '1h',
+  fast_period: 12,
+  slow_period: 26,
+  signal_period: 9,
+}
+
+const BOLLINGER_CONFIG = {
+  indicator: 'BOLLINGER',
+  timeframe: '1h',
+  period: 20,
+  std_dev_multiplier: 2.0,
+}
+
+type IndicatorType = 'RSI' | 'MACD' | 'BOLLINGER'
+
 const EMPTY_FORM: CreateBotRequest = {
   name: '',
   type: 'rule_based',
@@ -185,12 +210,49 @@ export function BotsPage() {
                 </div>
               </div>
 
-              {/* RSI Strategy Config — only shown for rule_based */}
+              {/* Indicator Selection & Config — only shown for rule_based */}
               {form.type === 'rule_based' && (
-                <div className="border border-slate-600 rounded-xl p-4 space-y-3">
-                  <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">
-                    RSI Strategy Config
-                  </p>
+                <div className="border border-slate-600 rounded-xl p-4 space-y-4">
+                  {/* Indicator Selector */}
+                  <div>
+                    <label className="block text-xs text-slate-400 uppercase tracking-wider font-medium mb-2">
+                      Indikator
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {(['RSI', 'MACD', 'BOLLINGER'] as IndicatorType[]).map((ind) => (
+                        <button
+                          key={ind}
+                          type="button"
+                          onClick={() => {
+                            let newConfig
+                            switch (ind) {
+                              case 'RSI':
+                                newConfig = { ...RSI_CONFIG }
+                                break
+                              case 'MACD':
+                                newConfig = { ...MACD_CONFIG }
+                                break
+                              case 'BOLLINGER':
+                                newConfig = { ...BOLLINGER_CONFIG }
+                                break
+                            }
+                            setForm({ ...form, config: newConfig })
+                          }}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                            (form.config as Record<string, unknown>).indicator === ind
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-700 text-slate-400 hover:text-white hover:bg-slate-600'
+                          }`}
+                        >
+                          {ind === 'RSI' && 'RSI (Mean Reversion)'}
+                          {ind === 'MACD' && 'MACD (Trend Following)'}
+                          {ind === 'BOLLINGER' && 'Bollinger Bands (Mean Reversion)'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Timeframe Selection (common for all) */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-xs text-slate-400 mb-1">
@@ -212,61 +274,187 @@ export function BotsPage() {
                         <option value="1d">1d — slow</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">
-                        Period
-                        <span className="text-slate-500 ml-1 normal-case">(RSI look-back)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={2}
-                        max={100}
-                        value={Number((form.config as Record<string, unknown>).period ?? 14)}
-                        onChange={(e) =>
-                          setForm({ ...form, config: { ...form.config, period: Number(e.target.value) } })
-                        }
-                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">
-                        Oversold
-                        <span className="text-slate-500 ml-1 normal-case">(BUY below)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={10}
-                        max={45}
-                        value={Number((form.config as Record<string, unknown>).oversold ?? 30)}
-                        onChange={(e) =>
-                          setForm({ ...form, config: { ...form.config, oversold: Number(e.target.value) } })
-                        }
-                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">
-                        Overbought
-                        <span className="text-slate-500 ml-1 normal-case">(SELL above)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min={55}
-                        max={90}
-                        value={Number((form.config as Record<string, unknown>).overbought ?? 70)}
-                        onChange={(e) =>
-                          setForm({ ...form, config: { ...form.config, overbought: Number(e.target.value) } })
-                        }
-                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    BUY when RSI crosses below <strong className="text-slate-400">{String((form.config as Record<string, unknown>).oversold ?? 30)}</strong>,
-                    {' '}SELL when RSI crosses above <strong className="text-slate-400">{String((form.config as Record<string, unknown>).overbought ?? 70)}</strong>.
-                    {' '}Ticks every <strong className="text-slate-400">{String((form.config as Record<string, unknown>).timeframe ?? '1h')}</strong>.
-                    {' '}Use <strong className="text-slate-400">1m</strong> for fast testing.
-                  </p>
+
+                  {/* RSI Config */}
+                  {(form.config as Record<string, unknown>).indicator === 'RSI' && (
+                    <div className="space-y-3 pt-3 border-t border-slate-700">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        RSI Einstellungen
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Period
+                            <span className="text-slate-500 ml-1 normal-case">(Look-back)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={2}
+                            max={100}
+                            value={Number((form.config as Record<string, unknown>).period ?? 14)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, period: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Oversold
+                            <span className="text-slate-500 ml-1 normal-case">(BUY below)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={10}
+                            max={45}
+                            value={Number((form.config as Record<string, unknown>).oversold ?? 30)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, oversold: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Overbought
+                            <span className="text-slate-500 ml-1 normal-case">(SELL above)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={55}
+                            max={90}
+                            value={Number((form.config as Record<string, unknown>).overbought ?? 70)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, overbought: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        BUY when RSI crosses below <strong className="text-slate-400">{String((form.config as Record<string, unknown>).oversold ?? 30)}</strong>,
+                        {' '}SELL when RSI crosses above <strong className="text-slate-400">{String((form.config as Record<string, unknown>).overbought ?? 70)}</strong>.
+                        {' '}Best geeignet für: <span className="text-amber-400">Ranging Märkte</span>
+                      </p>
+                    </div>
+                  )}
+
+                  {/* MACD Config */}
+                  {(form.config as Record<string, unknown>).indicator === 'MACD' && (
+                    <div className="space-y-3 pt-3 border-t border-slate-700">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        MACD Einstellungen
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Fast Period
+                            <span className="text-slate-500 ml-1 normal-case">(EMA)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={2}
+                            max={50}
+                            value={Number((form.config as Record<string, unknown>).fast_period ?? 12)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, fast_period: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Slow Period
+                            <span className="text-slate-500 ml-1 normal-case">(EMA)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={5}
+                            max={200}
+                            value={Number((form.config as Record<string, unknown>).slow_period ?? 26)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, slow_period: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Signal Period
+                            <span className="text-slate-500 ml-1 normal-case">(EMA)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={2}
+                            max={50}
+                            value={Number((form.config as Record<string, unknown>).signal_period ?? 9)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, signal_period: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        BUY wenn MACD Line über Signal Line kreuzt, SELL wenn darunter.
+                        {' '}Standard: Fast={String((form.config as Record<string, unknown>).fast_period ?? 12)}/
+                        Slow={String((form.config as Record<string, unknown>).slow_period ?? 26)}/
+                        Signal={String((form.config as Record<string, unknown>).signal_period ?? 9)}.
+                        {' '}Best geeignet für: <span className="text-emerald-400">Trending Märkte</span>
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Bollinger Config */}
+                  {(form.config as Record<string, unknown>).indicator === 'BOLLINGER' && (
+                    <div className="space-y-3 pt-3 border-t border-slate-700">
+                      <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">
+                        Bollinger Bands Einstellungen
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Period
+                            <span className="text-slate-500 ml-1 normal-case">(SMA)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={5}
+                            max={100}
+                            value={Number((form.config as Record<string, unknown>).period ?? 20)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, period: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">
+                            Std Dev Multiplier
+                            <span className="text-slate-500 ml-1 normal-case">(Bands)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min={0.5}
+                            max={5}
+                            step={0.1}
+                            value={Number((form.config as Record<string, unknown>).std_dev_multiplier ?? 2.0)}
+                            onChange={(e) =>
+                              setForm({ ...form, config: { ...form.config, std_dev_multiplier: Number(e.target.value) } })
+                            }
+                            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        BUY wenn Preis unter unteres Band fällt, SELL wenn über oberes Band steigt.
+                        {' '}Period: {String((form.config as Record<string, unknown>).period ?? 20)},
+                        {' '}Multiplier: {String((form.config as Record<string, unknown>).std_dev_multiplier ?? 2.0)}σ.
+                        {' '}Best geeignet für: <span className="text-amber-400">Ranging Märkte</span>
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="flex gap-3 pt-2">
@@ -331,6 +519,7 @@ export function BotsPage() {
                 <tbody className="divide-y divide-slate-700">
                   {data.bots.map((bot) => {
                     const action = getNextAction(bot.status)
+                    const indicator = (bot.config as Record<string, unknown>)?.indicator as string | undefined
                     return (
                       <tr key={bot.id} className="hover:bg-slate-700/50 transition-colors">
                         <td className="px-5 py-4">
@@ -342,6 +531,7 @@ export function BotsPage() {
                               {bot.name}
                             </p>
                             <p className="text-slate-500 text-xs mt-0.5">
+                              {indicator ? `${indicator.toLowerCase()} • ` : ''}
                               ${bot.virtual_balance.toLocaleString()}
                             </p>
                           </button>

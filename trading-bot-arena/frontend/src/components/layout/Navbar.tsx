@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 
 const NAV_LINKS = [
   { to: '/dashboard', label: 'Overview' },
+  { to: '/compare', label: 'Vergleich' },
   { to: '/bots', label: 'Bots' },
   { to: '/markets', label: 'Markets' },
   { to: '/debug', label: '🛠', title: 'Debug' },

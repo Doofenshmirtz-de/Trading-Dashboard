@@ -100,13 +100,25 @@ class RegimeService:
             Keine Exceptions — bei Fehlern wird RANGING zurückgegeben
         """
         try:
-            # Benötigte Kerzen: ADX braucht 2*period für validen Start
+            # Benötigte Kerzen: ADX braucht mindestens 2*period + 1 für validen Start
+            # Plus zusätzliche Puffer für Smoothing
             required_candles = max(
-                self.adx_period * 2,
+                self.adx_period * 2 + 5,  # Extra Puffer für ADX
                 self.bb_period + 5,
+                50,  # Minimale Anzahl für stabile Berechnungen
             )
             
             candles = await get_candles(pair, timeframe, required_candles)
+            
+            logger.info(
+                "Regime detection: fetched candles",
+                extra={
+                    "pair": pair,
+                    "timeframe": timeframe,
+                    "required": required_candles,
+                    "received": len(candles),
+                }
+            )
             
             if len(candles) < required_candles:
                 logger.warning(
@@ -131,7 +143,22 @@ class RegimeService:
             bb_width = self._calculate_bb_width(closes)
             sma_slope = self._calculate_sma_slope(closes, period=20)
             
+            # Debug-Logging der berechneten Werte
+            logger.info(
+                "Regime indicators calculated",
+                extra={
+                    "pair": pair,
+                    "adx": adx,
+                    "plus_di": plus_di,
+                    "minus_di": minus_di,
+                    "bb_width": bb_width,
+                    "sma_slope": sma_slope,
+                    "candles_used": len(candles),
+                }
+            )
+            
             # Klassifiziere Regime
+            current_sma = sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1]
             regime = self._classify_regime(
                 adx=adx,
                 bb_width=bb_width,
@@ -139,7 +166,18 @@ class RegimeService:
                 plus_di=plus_di,
                 minus_di=minus_di,
                 current_close=closes[-1],
-                current_sma=sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1],
+                current_sma=current_sma,
+            )
+            
+            logger.info(
+                "Regime classified",
+                extra={
+                    "pair": pair,
+                    "regime": regime.value,
+                    "adx": adx,
+                    "current_price": closes[-1],
+                    "sma_50": current_sma,
+                }
             )
             
             return RegimeResult(
@@ -161,7 +199,9 @@ class RegimeService:
                     "pair": pair,
                     "timeframe": timeframe,
                     "error": str(e),
-                }
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
             )
             return self._fallback_result(pair, timeframe)
     
@@ -184,7 +224,17 @@ class RegimeService:
             Tuple (adx, plus_di, minus_di) oder (None, None, None) bei Fehler
         """
         n = len(highs)
-        if n < self.adx_period * 2:
+        min_required = self.adx_period * 2 + 1  # Period für Initial-Smooth + Period für ADX
+        
+        if n < min_required:
+            logger.warning(
+                "ADX calculation: insufficient data",
+                extra={
+                    "required": min_required,
+                    "available": n,
+                    "adx_period": self.adx_period,
+                }
+            )
             return None, None, None
         
         # Berechne True Range und Directional Movement
@@ -220,22 +270,22 @@ class RegimeService:
                 plus_dm_values.append(0)
                 minus_dm_values.append(0)
         
-        # Wilder's Smoothing: Erster Wert ist Summe, danach EMA-ähnlich
-        alpha = 1 / self.adx_period
+        # Wilder's Smoothing: Initialisiere mit SMA der ersten 'period' Werte
+        tr_smooth = sum(tr_values[:self.adx_period]) / self.adx_period
+        plus_dm_smooth = sum(plus_dm_values[:self.adx_period]) / self.adx_period
+        minus_dm_smooth = sum(minus_dm_values[:self.adx_period]) / self.adx_period
         
-        # Initialisiere mit Summe der ersten 'period' Werte
-        tr_smooth = sum(tr_values[:self.adx_period])
-        plus_dm_smooth = sum(plus_dm_values[:self.adx_period])
-        minus_dm_smooth = sum(minus_dm_values[:self.adx_period])
-        
+        # Listen für DI-Werte
+        plus_di_values: list[float] = []
+        minus_di_values: list[float] = []
         dx_values: list[float] = []
         
-        # Berechne DI und DX für jeden Zeitpunkt
+        # Berechne DI und DX für jeden Zeitpunkt nach der Initial-Periode
         for i in range(self.adx_period, len(tr_values)):
-            # Smooth aktualisieren: prev_smooth - (prev_smooth/period) + current
-            tr_smooth = tr_smooth - (tr_smooth / self.adx_period) + tr_values[i]
-            plus_dm_smooth = plus_dm_smooth - (plus_dm_smooth / self.adx_period) + plus_dm_values[i]
-            minus_dm_smooth = minus_dm_smooth - (minus_dm_smooth / self.adx_period) + minus_dm_values[i]
+            # Wilder's Smoothing: (prev_smooth * (period-1) + current) / period
+            tr_smooth = (tr_smooth * (self.adx_period - 1) + tr_values[i]) / self.adx_period
+            plus_dm_smooth = (plus_dm_smooth * (self.adx_period - 1) + plus_dm_values[i]) / self.adx_period
+            minus_dm_smooth = (minus_dm_smooth * (self.adx_period - 1) + minus_dm_values[i]) / self.adx_period
             
             # +DI und -DI
             if tr_smooth > 0:
@@ -244,6 +294,9 @@ class RegimeService:
             else:
                 plus_di = 0
                 minus_di = 0
+            
+            plus_di_values.append(plus_di)
+            minus_di_values.append(minus_di)
             
             # DX (Directional Index)
             di_sum = plus_di + minus_di
@@ -254,38 +307,43 @@ class RegimeService:
             
             dx_values.append(dx)
         
-        # ADX ist geglätteter DX (wieder mit Wilder's Smoothing)
+        # ADX ist geglätteter DX mit derselben Periode
         if len(dx_values) < self.adx_period:
+            logger.warning(
+                "ADX calculation: insufficient DX values",
+                extra={
+                    "dx_count": len(dx_values),
+                    "required": self.adx_period,
+                }
+            )
             return None, None, None
         
+        # Initialisiere ADX mit SMA der ersten DX-Werte
         adx = sum(dx_values[:self.adx_period]) / self.adx_period
+        
+        # Wilder's Smoothing für restliche DX-Werte
         for i in range(self.adx_period, len(dx_values)):
-            adx = adx - (adx / self.adx_period) + dx_values[i]
+            adx = (adx * (self.adx_period - 1) + dx_values[i]) / self.adx_period
         
         # Aktuelle DI-Werte (letzte berechnete)
-        if len(tr_values) > 0:
-            final_idx = len(tr_values) - 1
-            tr_smooth = sum(tr_values[max(0, final_idx-self.adx_period+1):final_idx+1])
-            plus_dm_smooth = sum(plus_dm_values[max(0, final_idx-self.adx_period+1):final_idx+1])
-            minus_dm_smooth = sum(minus_dm_values[max(0, final_idx-self.adx_period+1):final_idx+1])
-            
-            # Smoothing für finale Werte
-            for i in range(max(0, final_idx-self.adx_period+1), final_idx+1):
-                tr_smooth = tr_smooth - (tr_smooth / self.adx_period) + tr_values[i]
-                plus_dm_smooth = plus_dm_smooth - (plus_dm_smooth / self.adx_period) + plus_dm_values[i]
-                minus_dm_smooth = minus_dm_smooth - (minus_dm_smooth / self.adx_period) + minus_dm_values[i]
-            
-            if tr_smooth > 0:
-                plus_di = 100 * plus_dm_smooth / tr_smooth
-                minus_di = 100 * minus_dm_smooth / tr_smooth
-            else:
-                plus_di = 0
-                minus_di = 0
+        if plus_di_values and minus_di_values:
+            final_plus_di = plus_di_values[-1]
+            final_minus_di = minus_di_values[-1]
         else:
-            plus_di = None
-            minus_di = None
+            final_plus_di = None
+            final_minus_di = None
         
-        return adx, plus_di, minus_di
+        logger.debug(
+            "ADX calculation complete",
+            extra={
+                "adx": adx,
+                "plus_di": final_plus_di,
+                "minus_di": final_minus_di,
+                "dx_count": len(dx_values),
+            }
+        )
+        
+        return adx, final_plus_di, final_minus_di
     
     def _calculate_bb_width(self, closes: list[float]) -> float | None:
         """
@@ -350,40 +408,45 @@ class RegimeService:
         1. HIGH_VOLATILITY (extreme Bewegungen)
         2. TRENDING_UP / TRENDING_DOWN (klare Trends)
         3. RANGING (Seitwärtsphase)
-        4. UNKNOWN (keine Daten)
+        4. UNKNOWN (nur wenn wirklich keine Daten)
         """
         # High Volatility Detection (oberste Priorität)
         if bb_width is not None and bb_width > self.bb_width_threshold:
             return MarketRegime.HIGH_VOLATILITY
         
         # Trend Detection (ADX muss vorhanden sein)
-        if adx is not None and adx > self.adx_threshold_trend:
-            # Uptrend oder Downtrend?
-            if current_close > current_sma:
-                # Plus überwiegt Minus?
-                if plus_di is not None and minus_di is not None:
-                    if plus_di > minus_di:
+        if adx is not None:
+            if adx > self.adx_threshold_trend:
+                # Uptrend oder Downtrend?
+                if current_close > current_sma:
+                    # Plus überwiegt Minus?
+                    if plus_di is not None and minus_di is not None:
+                        if plus_di > minus_di:
+                            return MarketRegime.TRENDING_UP
+                    else:
                         return MarketRegime.TRENDING_UP
                 else:
-                    return MarketRegime.TRENDING_UP
-            else:
-                if plus_di is not None and minus_di is not None:
-                    if minus_di > plus_di:
+                    if plus_di is not None and minus_di is not None:
+                        if minus_di > plus_di:
+                            return MarketRegime.TRENDING_DOWN
+                    else:
                         return MarketRegime.TRENDING_DOWN
-                else:
-                    return MarketRegime.TRENDING_DOWN
-        
-        # Ranging Detection (niedriger ADX)
-        if adx is not None and adx < self.adx_threshold_range:
-            return MarketRegime.RANGING
-        
-        # Fallback wenn ADX im mittleren Bereich
-        if adx is not None:
+            
+            # Ranging Detection (niedriger ADX)
+            if adx < self.adx_threshold_range:
+                return MarketRegime.RANGING
+            
+            # Fallback wenn ADX im mittleren Bereich (20-25)
             if current_close > current_sma:
                 return MarketRegime.TRENDING_UP
             else:
                 return MarketRegime.TRENDING_DOWN
         
+        # Wenn ADX None aber BB Width da ist → Ranging (konservativ)
+        if bb_width is not None:
+            return MarketRegime.RANGING
+        
+        # Nur UNKNOWN wenn wirklich gar keine Daten
         return MarketRegime.UNKNOWN
     
     def _fallback_result(self, pair: str, timeframe: str) -> RegimeResult:

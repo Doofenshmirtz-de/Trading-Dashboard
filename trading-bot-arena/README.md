@@ -2,6 +2,14 @@
 
 A crypto trading bot testing platform built with React, TypeScript, Vite, Tailwind CSS, and Supabase.
 
+## Projektplan (Main Bauplan)
+
+Der zentrale Fortschritts- und Maßnahmenplan liegt im Repository-Root:
+
+- `../projektplan.md`
+
+Bitte bei jeder größeren Änderung den Plan mit aktualisieren (Status, offene Punkte, nächste Schritte).
+
 ## Stack
 
 - **Frontend**: Vite + React 18 + TypeScript (strict)

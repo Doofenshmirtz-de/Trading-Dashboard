@@ -21,6 +21,7 @@ import logging
 from datetime import datetime, timezone
 
 import jsonschema
+from postgrest.exceptions import APIError
 
 from app.core.bot_base import Candle
 from app.core.bots import BotFactory
@@ -39,6 +40,11 @@ TIMEFRAME_SECONDS: dict[str, int] = {
     "4h": 14400,
     "1d": 86400,
 }
+
+
+def _is_missing_started_at_error(exc: APIError) -> bool:
+    text = str(exc)
+    return "PGRST204" in text and "started_at" in text and "bots" in text
 
 
 def _make_bot(bot_type: str, bot_id: str, config: dict, virtual_balance: float):
@@ -185,7 +191,16 @@ class BotRunner:
 
         # Update started_at in Supabase when bot starts
         try:
+            client = get_supabase_client()
             client.table("bots").update({"started_at": datetime.now(timezone.utc).isoformat()}).eq("id", bot_id).execute()
+        except APIError as e:
+            if _is_missing_started_at_error(e):
+                logger.warning(
+                    "started_at column missing in schema cache; skipping started_at update",
+                    extra={"bot_id": bot_id},
+                )
+            else:
+                logger.warning("Failed to update started_at", extra={"bot_id": bot_id, "error": str(e)})
         except Exception as e:
             logger.warning("Failed to update started_at", extra={"bot_id": bot_id, "error": str(e)})
 

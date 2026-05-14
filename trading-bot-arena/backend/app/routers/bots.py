@@ -3,6 +3,7 @@ import re
 import statistics
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException
+from postgrest.exceptions import APIError
 from app.dependencies import get_current_user
 from app.services.supabase import get_supabase_client
 from app.services.bot_runner import bot_runner
@@ -45,6 +46,11 @@ def _row_to_response(row: dict) -> BotResponse:
         updated_at=str(row["updated_at"]),
         started_at=row.get("started_at"),
     )
+
+
+def _is_missing_started_at_error(exc: APIError) -> bool:
+    text = str(exc)
+    return "PGRST204" in text and "started_at" in text and "bots" in text
 
 
 def _get_bot_or_404(bot_id: str, user_id: str) -> dict:
@@ -209,13 +215,31 @@ async def update_bot(
         update_data["virtual_balance"] = body.virtual_balance
 
     client = get_supabase_client()
-    resp = (
-        client.table("bots")
-        .update(update_data)
-        .eq("id", bot_id)
-        .eq("user_id", user_id)
-        .execute()
-    )
+    try:
+        resp = (
+            client.table("bots")
+            .update(update_data)
+            .eq("id", bot_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except APIError as e:
+        # Supabase schema cache may lag behind migrations; retry without started_at.
+        if "started_at" in update_data and _is_missing_started_at_error(e):
+            logger.warning(
+                "started_at column missing in schema cache, retrying update without started_at",
+                extra={"bot_id": bot_id, "user_id": user_id},
+            )
+            fallback_update_data = {k: v for k, v in update_data.items() if k != "started_at"}
+            resp = (
+                client.table("bots")
+                .update(fallback_update_data)
+                .eq("id", bot_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+        else:
+            raise
     updated_row = resp.data[0]
 
     # Hook into BotRunner on status transitions — non-critical; never fail the HTTP response
@@ -345,18 +369,42 @@ async def get_bot_snapshots(
     )
     all_snapshots = data_resp.data or []
 
-    # Downsample: keep last snapshot per resolution bucket
-    bucket_seconds = _RESOLUTION_SECONDS[resolution]
-    buckets: dict[int, dict] = {}
+    # Parse + sanitize snapshots first (protect charts from legacy corrupted points).
+    parsed_snapshots: list[dict] = []
     for snap in all_snapshots:
         try:
             ts = datetime.fromisoformat(snap["timestamp"].replace("Z", "+00:00"))
-            bucket = int(ts.timestamp() // bucket_seconds) * bucket_seconds
-            buckets[bucket] = snap  # later snap overwrites earlier in same bucket
-        except (ValueError, KeyError):
+            pnl_pct = float(snap.get("pnl_pct") or 0.0)
+            # Ignore clearly corrupted historical points that can distort multi-timeframe charts.
+            if abs(pnl_pct) > 250:
+                continue
+            snap_copy = dict(snap)
+            snap_copy["_epoch"] = int(ts.timestamp())
+            parsed_snapshots.append(snap_copy)
+        except (ValueError, KeyError, TypeError):
             continue
 
+    if not parsed_snapshots:
+        return {"snapshots": [], "bot": _row_to_response(bot_row).model_dump()}
+
+    # Restrict to the requested rolling time window, not just last N rows.
+    # This fixes 1D/1M/ALL showing very old points when bots don't produce dense snapshots.
+    bucket_seconds = _RESOLUTION_SECONDS[resolution]
+    latest_epoch = parsed_snapshots[-1]["_epoch"]
+    cutoff_epoch = latest_epoch - (limit * bucket_seconds)
+    windowed_snapshots = [s for s in parsed_snapshots if s["_epoch"] >= cutoff_epoch]
+    if not windowed_snapshots:
+        windowed_snapshots = parsed_snapshots[-limit:]
+
+    # Downsample: keep last snapshot per resolution bucket
+    buckets: dict[int, dict] = {}
+    for snap in windowed_snapshots:
+        bucket = int(snap["_epoch"] // bucket_seconds) * bucket_seconds
+        buckets[bucket] = snap  # later snap overwrites earlier in same bucket
+
     downsampled = sorted(buckets.values(), key=lambda s: s["timestamp"])[-limit:]
+    for snap in downsampled:
+        snap.pop("_epoch", None)
     return {"snapshots": downsampled, "bot": _row_to_response(bot_row).model_dump()}
 
 

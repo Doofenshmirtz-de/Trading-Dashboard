@@ -1,12 +1,13 @@
 # Trading Bot Arena — Projektplan
-> Zuletzt aktualisiert: 14. Mai 2026
+> Zuletzt aktualisiert: 15. Mai 2026
 
 ---
 
 ## 1. Projekt-Status
-**Phase 3 — Sandbox Engine (96% abgeschlossen)**
-Live auf Vercel + Railway + Supabase. Bots laufen, generieren Signale und tracken Performance.
-Offen: Abschluss-Monitoring und Bot-4-Strategiefeinschliff.
+**Phase 4 — Backtesting Engine ✅ abgeschlossen (15. Mai 2026)**
+Live auf Vercel + Railway + Supabase. Backtesting-Engine für RSI/MACD/Bollinger läuft produktiv.
+Copy Trading entfernt (EU/DE Geo-Sperre, regulatorisch verboten).
+Nächster Schritt: Phase 5 — Live Trading vorbereiten.
 
 ---
 
@@ -22,9 +23,9 @@ Offen: Abschluss-Monitoring und Bot-4-Strategiefeinschliff.
 | RSI (Rule Based) | ✅ Live |
 | MACD | ✅ Implementiert |
 | Bollinger Band | ✅ Implementiert |
-| Copy Trading | ⚠️ UI vorhanden, keine Logik |
-| ML/AI | 🔲 Phase 4 |
-| Custom | 🔲 Phase 4 |
+| Copy Trading | ❌ Entfernt (EU/DE regulatorisch verboten) |
+| ML/AI | 🔲 Phase 5+ |
+| Custom | 🔲 Phase 5+ |
 
 ---
 
@@ -185,36 +186,45 @@ trading-bot-arena/
 
 ---
 
-## 5. Offene To-dos (nächste 3 konkrete Schritte)
+## 5. To-dos für morgen (16. Mai 2026)
 
-### Schritt 1 — Bot-4 Strategiefeinschliff (1m RSI) 🟡
-**Problem:** Sehr hoher `hold`-Anteil (`1287/1438` in 24h), wenig Ausführungen.
-**Ziel:** Trades qualitativ verbessern, ohne Overtrading zu erzeugen.
-**Fix:**
-- RSI-Parameter für 1m prüfen/kalibrieren (Schwellen + Period)
-- Trade-Trigger gegen Position-State matchen
-- 24h Vergleich vorher/nachher dokumentieren
-
-### Schritt 2 — Restliche Snapshot-Ausreißer prüfen 🟡
-**Status:** Für Bot 3 (`5cb9...`) bereits bereinigt + verifiziert.
-**Offen:**
-- Restliche Bots auf Alt-Ausreißer prüfen
-- Bei Bedarf mit Backup-Tabelle gezielt bereinigen
-
-### Schritt 3 — 24h Stabilitätsbeobachtung 🟢
-**Ziel:** Phase-3-Abnahme mit Monitoring absichern.
+### 🔴 Prio 1 — Deploy-Verifikation (Copy Trading Cleanup)
+**Was:** Sicherstellen, dass der aktuelle Commit (`cb7d09e`) auf Railway + Vercel sauber deployed ist.
 **Checks:**
-- Scheduler tickt durchgehend
-- Snapshots kommen pro Timeframe erwartbar
-- Keine neuen 500er bei Start/Stop
+- Railway Logs: Kein `CopyTradingBot`-Import-Fehler beim Start
+- Railway Logs: Keine `getLeaderboardRank`-Calls mehr
+- Vercel: Bot-Erstellen-Modal zeigt nur noch `Rule Based`, `ML`, `Custom`
+- Debug Panel: Kein Binance-Leaderboard-Test mehr sichtbar
 
-### Schritt 4 — `started_at` in Prod finalisieren 🔴 (abgeschlossen)
-**Problem:** `PATCH /bots/{id}` schlug mit 500 fehl, wenn `started_at` im PostgREST Schema-Cache fehlte.
-**Status:** ✅ SQL ausgeführt, Backfill erfolgreich, Start/Stop wieder stabil.
-**Fix:**
-- `ALTER TABLE ... ADD COLUMN started_at` in Supabase ausführen
-- `NOTIFY pgrst, 'reload schema'` ausführen
-- Start/Stop-Endpunkte danach aktiv verifizieren
+---
+
+### 🟡 Prio 2 — Phase 3 abschließen: Bot-4 Strategiefeinschliff
+**Problem:** Bot 4 handelt mit sehr engen RSI-Grenzen (45/55) auf 1m — hoher `hold`-Anteil, schlechte PnL.
+**Ziel:** Parameter kalibrieren, damit der Bot realistische Signale generiert.
+**Schritte:**
+- RSI-Period auf 14 setzen, Schwellen auf 30/70 (Standard) oder 35/65 (aggressiver)
+- Timeframe ggf. auf 5m oder 15m wechseln für weniger Rauschen
+- 24h Vergleich: PnL + Win Rate vorher/nachher dokumentieren
+
+---
+
+### 🟡 Prio 3 — Phase 5 Planung: Live Trading Konzept
+**Was:** Vorbereitung für echtes Trading (nur konzeptionell, kein Code heute).
+**Zu klären:**
+- Binance Testnet anbinden (API Key + Secret als Railway-Env-Var)
+- Order-Ausführungs-Layer: `ccxt.create_order()` vs. Binance REST direkt
+- Risk Management: Max-Position-Size, Max-Drawdown-Notbremse, Kill-Switch
+- Wallet-Isolation: separates Sub-Konto für Live-Bot empfohlen
+- Deployment-Strategie: neue Railway-Env `ENV=live` + Feature-Flag
+
+---
+
+### 🟢 Prio 4 — Optional: Backtesting UX verbessern
+Falls Zeit bleibt — kleine Verbesserungen an der Backtest-Seite:
+- [ ] Mehrere Backtests gleichzeitig vergleichen (Equity Curves übereinander)
+- [ ] Export als CSV (Trade-Log)
+- [ ] Benchmark-Linie: "Buy & Hold" Performance als Referenz im Chart
+- [ ] Parameteroptimierung: Grid-Search über RSI-Periode/Schwellen (Backend-Loop)
 
 ---
 
@@ -228,7 +238,7 @@ trading-bot-arena/
 | 4 | 🟢 Behoben | "Time online: 0m" | `started_at` war null bei Alt-Bots | Behoben (Backfill ausgeführt) |
 | 5 | 🟢 Behoben | Snapshot-Stopp seit 30. Apr. | Scheduler-Startup/Robustness unvollständig | Behoben |
 | 6 | 🟢 Behoben | Comparison Dashboard fehlt | Noch nicht implementiert | Behoben |
-| 7 | 🟢 Gering | Copy Trading Bot hat keine Logik | Placeholder-Status in DB, keine BotRunner-Implementierung | Bekannt, Phase 4 |
+| 7 | 🟢 Entfernt | Copy Trading Bot | EU/DE Geo-Sperre + regulatorisches Verbot | Entfernt (15. Mai 2026) |
 
 ---
 

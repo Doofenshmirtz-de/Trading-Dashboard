@@ -262,7 +262,7 @@ Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
 | Phase 1 | Fundament (Auth, DB, Deployment) | ✅ Abgeschlossen |
 | Phase 2 | Backend + Dashboard UI | ✅ Abgeschlossen |
 | Phase 3 | Sandbox Engine + Vergleich | 🔄 96% — Monitoring + Bot-4-Feinschliff offen |
-| Phase 4 | Copy Trading + Backtesting Engine | 🔄 In Bearbeitung |
+| Phase 4 | Copy Trading + Backtesting Engine | 🔄 90% — beide Schritte implementiert, Deploy ausstehend |
 | Phase 5 | Live Trading | 🔲 Geplant (nach Phase 4) |
 
 ---
@@ -275,58 +275,69 @@ Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
 
 ---
 
-### Schritt 1 — Backtesting Engine 🔄 In Bearbeitung
+### Schritt 1 — Backtesting Engine ✅ Abgeschlossen (15. Mai 2026)
 
 **Backend (`/backtest`):**
-- [ ] `POST /backtest/run` — Nimmt `bot_type`, `pair`, `timeframe`, `from_date`, `to_date`, `config` entgegen
-- [ ] Historische OHLCV-Daten per ccxt von Binance laden (paginiert, bis zu 1000 Candles pro Request)
-- [ ] Bestehende Bot-Klassen (RSIBot, MACDBot, BollingerBot) gegen historische Daten laufen lassen
-- [ ] Ergebnisse: `pnl_pct`, `sharpe`, `win_rate`, `max_drawdown`, `trade_count`, `trades[]`
-- [ ] `GET /backtest/results` — Liste der gespeicherten Backtests des Users
-- [ ] Ergebnisse in neue Supabase-Tabelle `backtest_runs` speichern
+- [x] `POST /backtest/run` — Indikator-Config, Pair, Zeitraum, Startkapital → Simulation
+- [x] Historische OHLCV-Daten per ccxt von Binance laden (paginiert, bis 3000 Kerzen)
+- [x] Bestehende Bot-Klassen (RSIBot, MACDBot, BollingerBot) gegen historische Daten laufen lassen
+- [x] Ergebnisse: `pnl_pct`, `sharpe`, `win_rate`, `max_drawdown`, `trade_count`, `equity_curve[]`, `trades[]`
+- [x] `GET /backtest/results` — Liste der gespeicherten Backtests des Users
+- [x] `GET /backtest/results/{id}` — Vollresultat mit Equity Curve + Trades
+- [x] `DELETE /backtest/results/{id}` — Backtest löschen
+- [x] Ergebnisse in Supabase-Tabelle `backtest_runs` gespeichert
+- [x] `binance.get_historical_candles()` — neue paginierende Hilfsfunktion
 
 **Datenbank:**
-- [ ] Neue Tabelle `backtest_runs` (id, user_id, bot_type, pair, timeframe, from_date, to_date, config, result_json, created_at)
-- [ ] RLS: User sieht nur eigene Backtest-Ergebnisse
+- [x] Tabelle `backtest_runs` mit RLS angelegt (`backend/sql/phase4_backtest_runs.sql`)
+- [x] Index auf `(user_id, created_at DESC)` für schnelle Abfragen
 
-**Frontend (`/dashboard/Backtest.tsx`):**
-- [ ] Formular: Bot-Typ, Pair, Timeframe, Von-Bis-Datum, Bot-Config (JSON)
-- [ ] Ergebniskarte: PnL%, Sharpe, Win Rate, Max DD, Trade Count
-- [ ] Equity Curve Chart (Recharts) für den Backtest-Verlauf
-- [ ] Ergebnisliste: Alle vergangenen Backtests des Users
-- [ ] Navigation: "Backtest" Link in Navbar
+**Frontend (`/backtest`):**
+- [x] Formular: Indikator (RSI/MACD/BB), dynamische Config-Felder, Pair, Timeframe, Datum, Startkapital
+- [x] Ergebniskarten: PnL%, Win Rate, Trades, Max DD, Sharpe
+- [x] Equity Curve Chart (Recharts, grün/rot je nach Ergebnis) mit Start-Referenzlinie
+- [x] Trade-Log-Tabelle (Datum, BUY/SELL Badge, Preis, PnL%, Grund)
+- [x] Verlaufs-Tabelle: alle vergangenen Backtests, laden/löschen
+- [x] Navbar-Link "Backtest" hinzugefügt
+- [x] TypeScript Typen: `BacktestRequest`, `BacktestResult`, `BacktestSummary`, etc.
 
 ---
 
-### Schritt 2 — Copy Trading Bot 🔲 Geplant
+### Schritt 2 — Copy Trading Bot ✅ Abgeschlossen (15. Mai 2026)
 
-**Konzept:** Ein Bot der Trades eines "Lead Traders" nachbildet.
-
-**Mögliche Quellen (noch zu entscheiden):**
-- Binance Copy Trading API (offizieller Lead-Trader per Binance-ID)
-- Manuelle Signal-Eingabe (Admin gibt Trade-Signale über API-Endpunkt ein)
-- Telegram Signal-Kanal (Webhook-basiert)
+**Konzept:** Bot spiegelt Positionen eines Binance Lead Traders (öffentliches Leaderboard API).
 
 **Backend:**
-- [ ] `CopyTradingBot` Klasse (erbt von `BaseBot`)
-- [ ] Signal-Quelle konfigurierbar (zunächst: manuell / Webhook)
-- [ ] Paper-Trading mit VirtualPortfolioEngine
-- [ ] Risk Management: Max Position Size, Stop-Loss konfigurierbar
+- [x] `CopyTradingBot` Klasse (`backend/app/core/bots/copy_trading_bot.py`)
+  - Pollt Leader-Positionsstate per `set_leader_state()` (injiziert durch BotRunner vor `on_candle()`)
+  - Stop-Loss: Auto-SELL wenn Position X% im Minus (config: `stop_loss_pct`, default 5%)
+  - Take-Profit: Auto-SELL wenn Position X% im Plus (config: `take_profit_pct`, default 10%)
+  - Max Daily Loss: Bot pausiert bis nächsten UTC-Tag wenn kumulierter Tagesverlust > X% (config: `max_daily_loss_pct`, default 15%)
+  - Kein Warm-up nötig (Leader-State-basiert, nicht Indikator-basiert)
+- [x] `binance.get_copy_leader_positions(portfolio_id, pair)` — Binance Leaderboard API (öffentlich, kein Auth)
+  - Zweistufig: `getLeaderboardRank` → `encryptedUid` → `getOtherPosition`
+  - 30s Position-Cache um API-Rate-Limits zu schonen
+  - Graceful Fallback: bei API-Fehler → `has_position=False` + Error-Meldung ins Signal
+- [x] BotRunner: `copy_trading` Bot-Typ unterstützt, Leader-Polling in `_tick_bot`
+- [x] Kein Warm-up für Copy Trading Bots (Warm-up nur für `rule_based`)
 
 **Frontend:**
-- [ ] Copy Trading im `CreateBotModal` aktivieren
-- [ ] Lead-Trader-ID / Webhook-URL als Config-Feld
-- [ ] Live-Signal-Feed auf BotDetail-Seite
+- [x] Copy Trading Config-Block im CreateBotModal (`BotsPage.tsx`)
+  - **Leader-Browser**: Binance Leaderboard direkt im Modal (sortierbar nach ROI/PnL, Zeitraum WEEKLY/MONTHLY/ALL)
+  - **Zufällig-Button**: wählt zufällig einen Trader aus der Top-20-Liste
+  - **Manuelle Eingabe**: Tab für direkte Portfolio-ID-Eingabe (Fallback)
+  - Tick-Intervall, Stop-Loss %, Take-Profit %, Max-Tages-Verlust % als Eingabefelder
+  - `GET /market/copy-trading/leaders` — neuer Backend-Endpoint mit 5min Cache
 
 ---
 
 ### Definition of Done — Phase 4 Schritt 1 (Backtesting)
-- [ ] `POST /backtest/run` liefert korrekte Metriken für RSI/MACD/Bollinger
-- [ ] Equity Curve im Backtest sieht plausibel aus (kein Gap-Start)
-- [ ] Ergebnisse werden in Supabase gespeichert und wieder abrufbar
-- [ ] Frontend zeigt Formular + Ergebnisse korrekt an
-- [ ] Typen + Lints fehlerfrei
-- [ ] Deployment auf Railway + Vercel erfolgreich
+- [x] `POST /backtest/run` liefert korrekte Metriken für RSI/MACD/Bollinger
+- [x] Equity Curve im Backtest sieht plausibel aus (kein Gap-Start, Referenzlinie bei Startkapital)
+- [x] Ergebnisse werden in Supabase gespeichert und wieder abrufbar
+- [x] Frontend zeigt Formular + Ergebnisse korrekt an
+- [x] Typen + Lints fehlerfrei
+- [x] Deployment auf Railway + Vercel erfolgreich (vom User verifiziert)
 
 ---
 

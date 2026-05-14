@@ -26,8 +26,9 @@ from postgrest.exceptions import APIError
 from app.core.bot_base import Candle
 from app.core.bots import BotFactory
 from app.core.bots.rsi_bot import RSIBot
+from app.core.bots.copy_trading_bot import CopyTradingBot
 from app.core.portfolio_engine import VirtualPortfolioEngine
-from app.services.binance import get_candles
+from app.services.binance import get_candles, get_copy_leader_positions
 from app.services.supabase import get_supabase_client
 
 logger = logging.getLogger("trading_bot_arena")
@@ -65,7 +66,10 @@ def _make_bot(bot_type: str, bot_id: str, config: dict, virtual_balance: float):
         except ValueError as e:
             raise ValueError(f"Unsupported indicator: {indicator}. "
                            f"Available: {BotFactory.list_available()}") from e
-    # TODO Phase 4: Add copy_trading, ml, custom bot types
+
+    if bot_type == "copy_trading":
+        return CopyTradingBot(bot_id=bot_id, config=config, virtual_balance=virtual_balance)
+
     raise ValueError(f"Unsupported bot type for sandbox execution: {bot_type!r}")
 
 
@@ -155,28 +159,29 @@ class BotRunner:
         # Reconstruct open position from trade history
         await self._reconstruct_position(bot_id, engine, initial_balance)
 
-        # Warm up bot with historical candles (feed without executing trades)
-        # Dynamische Warm-up Berechnung basierend auf Indikator
-        indicator = config.get("indicator", "RSI")
-        try:
-            warmup_count = BotFactory.get_warmup_count(indicator, config)
-        except ValueError:
-            warmup_count = 35  # Safe default for unknown indicators (26 + 9)
-        warmup_count += 2  # one extra for safety
-        try:
-            raw_candles = await get_candles(pair, timeframe, warmup_count)
-            for row in raw_candles:
-                candle = _row_to_candle(row)
-                bot.on_candle(candle)
-            logger.info(
-                "Bot warm-up complete",
-                extra={"bot_id": bot_id, "bot_name": bot_name, "candles": len(raw_candles)},
-            )
-        except Exception as e:
-            logger.warning(
-                "Bot warm-up failed (will start cold)",
-                extra={"bot_id": bot_id, "error": str(e)},
-            )
+        # Warm up indicator-based bots with historical candles
+        # Copy trading bots don't need warm-up — they react to leader state
+        if bot_type == "rule_based":
+            indicator = config.get("indicator", "RSI")
+            try:
+                warmup_count = BotFactory.get_warmup_count(indicator, config)
+            except ValueError:
+                warmup_count = 35  # Safe default for unknown indicators (26 + 9)
+            warmup_count += 2  # one extra for safety
+            try:
+                raw_candles = await get_candles(pair, timeframe, warmup_count)
+                for row in raw_candles:
+                    candle = _row_to_candle(row)
+                    bot.on_candle(candle)
+                logger.info(
+                    "Bot warm-up complete",
+                    extra={"bot_id": bot_id, "bot_name": bot_name, "candles": len(raw_candles)},
+                )
+            except Exception as e:
+                logger.warning(
+                    "Bot warm-up failed (will start cold)",
+                    extra={"bot_id": bot_id, "error": str(e)},
+                )
 
         self.running[bot_id] = {
             "bot": bot,
@@ -286,6 +291,18 @@ class BotRunner:
         candle = _row_to_candle(raw[-2])
         current_price = float(raw[-1]["close"] if isinstance(raw[-1], dict) else raw[-1][4])  # latest close for snapshot
 
+        # Inject leader state for Copy Trading bots before calling on_candle
+        if isinstance(bot, CopyTradingBot):
+            portfolio_id = entry["config"].get("leader_portfolio_id", "")
+            if portfolio_id:
+                leader_state = await get_copy_leader_positions(portfolio_id, pair)
+                bot.set_leader_state(
+                    has_position=leader_state["has_position"],
+                    api_error=leader_state.get("error"),
+                )
+            else:
+                bot.set_leader_state(has_position=False, api_error="No leader_portfolio_id configured")
+
         # Feed candle to bot
         signal = bot.on_candle(candle)
 
@@ -333,9 +350,11 @@ class BotRunner:
 
         # Logging mit Indikator-Info
         action = signal.action if signal else "none"
-        indicator_name = entry["config"].get("indicator", "RSI")
 
-        if rsi_value is not None:
+        if isinstance(bot, CopyTradingBot):
+            leader_status = "in_pos" if bot._leader_in_position else "flat"
+            indicator_text = f"CopyTrading | leader={leader_status}"
+        elif rsi_value is not None:
             indicator_text = f"RSI={rsi_value:.1f}"
         elif macd_value is not None:
             indicator_text = f"MACD={macd_value:.2f}"

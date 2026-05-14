@@ -148,6 +148,26 @@ export interface SignalsResponse {
   total: number
 }
 
+// ── Phase 4: Copy Trading types ───────────────────────────────────────────────
+
+export interface CopyLeader {
+  portfolio_id: string
+  nick_name: string
+  roi: number         // percentage, e.g. 123.4 = +123.4%
+  pnl: number         // USDT total
+  win_rate: number    // percentage, e.g. 65.0 = 65%
+  follower_count: number
+  copier_count: number
+  position_shared: boolean
+  max_drawdown: number  // percentage
+}
+
+export interface CopyLeadersResponse {
+  leaders: CopyLeader[]
+  sort_by: string
+  period: string
+}
+
 // ── Phase 4: Backtesting types ─────────────────────────────────────────────────
 
 export interface BacktestRequest {

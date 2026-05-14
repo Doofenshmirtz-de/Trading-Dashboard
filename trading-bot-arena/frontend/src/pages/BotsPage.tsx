@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchBots, createBot, updateBot, deleteBot } from '../lib/api'
+import { fetchBots, createBot, updateBot, deleteBot, fetchCopyLeaders } from '../lib/api'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import { useToast } from '../components/ui/Toast'
-import type { Bot, CreateBotRequest, BotStatus } from '../types'
+import type { Bot, CreateBotRequest, BotStatus, CopyLeader } from '../types'
 
 const PAGE_SIZE = 10
 
@@ -28,7 +28,14 @@ function getNextAction(
 
 const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   rule_based: { indicator: 'RSI', timeframe: '1h', period: 14, oversold: 30, overbought: 70 },
-  copy_trading: { trader_id: '' },
+  copy_trading: {
+    leader_portfolio_id: '',
+    timeframe: '1m',
+    stop_loss_pct: 5,
+    take_profit_pct: 10,
+    max_daily_loss_pct: 15,
+    position_size_pct: 95,
+  },
   ml: { model_name: '' },
   custom: {},
 }
@@ -66,6 +73,278 @@ const EMPTY_FORM: CreateBotRequest = {
   initial_balance: 10000,
   trading_pair: 'BTC/USDT:USDT',
 }
+
+// ── CopyTradingConfig sub-component ───────────────────────────────────────────
+
+type CopyTab = 'browse' | 'manual'
+type SortBy = 'ROI' | 'PNL'
+type Period = 'WEEKLY' | 'MONTHLY' | 'ALL'
+
+function CopyTradingConfig({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>
+  onChange: (updated: Record<string, unknown>) => void
+}) {
+  const [tab, setTab] = useState<CopyTab>('browse')
+  const [sortBy, setSortBy] = useState<SortBy>('ROI')
+  const [period, setPeriod] = useState<Period>('MONTHLY')
+  const [selectedId, setSelectedId] = useState<string>(
+    String(config.leader_portfolio_id ?? ''),
+  )
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['copy-leaders', sortBy, period],
+    queryFn: () => fetchCopyLeaders(sortBy, period, 20),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  function selectLeader(leader: CopyLeader) {
+    setSelectedId(leader.portfolio_id)
+    onChange({
+      ...config,
+      leader_portfolio_id: leader.portfolio_id,
+      _leader_name: leader.nick_name,
+    })
+  }
+
+  function pickRandom() {
+    const leaders = data?.leaders ?? []
+    if (!leaders.length) return
+    const pick = leaders[Math.floor(Math.random() * leaders.length)]
+    selectLeader(pick)
+  }
+
+  const selectedLeader = data?.leaders.find((l) => l.portfolio_id === selectedId)
+
+  return (
+    <div className="border border-amber-700/50 bg-amber-900/10 rounded-xl p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-amber-400">🔗</span>
+          <p className="text-xs text-amber-300 uppercase tracking-wider font-semibold">
+            Copy Trading — Lead Trader auswählen
+          </p>
+        </div>
+        {selectedId && (
+          <span className="text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 px-2 py-0.5 rounded-full">
+            ✓ {selectedLeader?.nick_name ?? selectedId.slice(0, 8) + '…'}
+          </span>
+        )}
+      </div>
+
+      {/* Tab switcher */}
+      <div className="flex gap-1 bg-slate-900/50 p-0.5 rounded-lg w-fit">
+        {(['browse', 'manual'] as CopyTab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              tab === t
+                ? 'bg-amber-600 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {t === 'browse' ? '🔍 Durchsuchen' : '✏️ Manuell'}
+          </button>
+        ))}
+      </div>
+
+      {/* Browse tab */}
+      {tab === 'browse' && (
+        <div className="space-y-3">
+          {/* Filters + Random */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500">Sortieren:</span>
+            {(['ROI', 'PNL'] as SortBy[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSortBy(s)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  sortBy === s
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                {s === 'ROI' ? 'ROI %' : 'PnL $'}
+              </button>
+            ))}
+            <span className="text-slate-600 text-xs">|</span>
+            {(['WEEKLY', 'MONTHLY', 'ALL'] as Period[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPeriod(p)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  period === p
+                    ? 'bg-slate-600 text-white'
+                    : 'bg-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                {p === 'WEEKLY' ? '7T' : p === 'MONTHLY' ? '30T' : 'Alle'}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={pickRandom}
+              disabled={isLoading || !data?.leaders.length}
+              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-700/60 hover:bg-purple-600 text-purple-200 disabled:opacity-40 transition-colors"
+            >
+              🎲 Zufällig
+            </button>
+          </div>
+
+          {/* Leader list */}
+          {isLoading && (
+            <div className="text-center py-6 text-slate-500 text-sm">
+              <svg className="animate-spin h-5 w-5 mx-auto mb-2 text-amber-500" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              Lade Leaderboard…
+            </div>
+          )}
+          {isError && (
+            <div className="text-center py-4 text-amber-600 text-xs">
+              Binance Leaderboard nicht verfügbar — bitte manuell eingeben.
+            </div>
+          )}
+          {!isLoading && !isError && (
+            <div className="overflow-y-auto max-h-56 rounded-lg border border-slate-700 divide-y divide-slate-700/50">
+              {(data?.leaders ?? []).length === 0 ? (
+                <p className="text-center py-4 text-slate-500 text-xs">Keine Trader gefunden</p>
+              ) : (
+                (data?.leaders ?? []).map((leader) => {
+                  const isSelected = leader.portfolio_id === selectedId
+                  return (
+                    <button
+                      key={leader.portfolio_id}
+                      type="button"
+                      onClick={() => selectLeader(leader)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                        isSelected
+                          ? 'bg-amber-900/40 border-l-2 border-amber-500'
+                          : 'hover:bg-slate-700/50'
+                      }`}
+                    >
+                      {/* Name */}
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium text-white truncate">
+                          {leader.nick_name}
+                          {!leader.position_shared && (
+                            <span className="ml-1.5 text-xs text-slate-500">(privat)</span>
+                          )}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {leader.follower_count.toLocaleString()} Follower
+                        </span>
+                      </span>
+                      {/* Stats */}
+                      <div className="flex gap-4 shrink-0 text-right">
+                        <div>
+                          <p className={`text-sm font-bold ${leader.roi >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {leader.roi >= 0 ? '+' : ''}{leader.roi.toFixed(1)}%
+                          </p>
+                          <p className="text-xs text-slate-500">ROI</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-white">{leader.win_rate.toFixed(0)}%</p>
+                          <p className="text-xs text-slate-500">Win</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-red-400">-{leader.max_drawdown.toFixed(1)}%</p>
+                          <p className="text-xs text-slate-500">MaxDD</p>
+                        </div>
+                      </div>
+                      {isSelected && <span className="text-amber-400 text-sm shrink-0">✓</span>}
+                    </button>
+                  )
+                })
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Manual tab */}
+      {tab === 'manual' && (
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">
+            Portfolio ID
+            <span className="text-slate-500 ml-1 normal-case">
+              (aus Binance URL: /copy-trading/lead-trader/
+              <span className="text-amber-500">XXXXXXXX</span>)
+            </span>
+          </label>
+          <input
+            value={String(config.leader_portfolio_id ?? '')}
+            onChange={(e) => {
+              setSelectedId(e.target.value)
+              onChange({ ...config, leader_portfolio_id: e.target.value })
+            }}
+            placeholder="z.B. 3953748A4FE10DFA97B2E5A5E4641B82"
+            className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm font-mono placeholder-slate-500 focus:outline-none focus:border-amber-500"
+          />
+        </div>
+      )}
+
+      {/* Timeframe */}
+      <div>
+        <label className="block text-xs text-slate-400 mb-1">
+          Tick-Intervall
+          <span className="text-slate-500 ml-1 normal-case">(1m empfohlen)</span>
+        </label>
+        <select
+          value={String(config.timeframe ?? '1m')}
+          onChange={(e) => onChange({ ...config, timeframe: e.target.value })}
+          className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+        >
+          <option value="1m">1m — empfohlen</option>
+          <option value="5m">5m</option>
+          <option value="15m">15m</option>
+          <option value="1h">1h</option>
+        </select>
+      </div>
+
+      {/* Risk controls */}
+      <div className="pt-3 border-t border-slate-700 space-y-3">
+        <p className="text-xs text-slate-400 uppercase tracking-wider font-medium">Risiko-Kontrolle</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {[
+            { key: 'stop_loss_pct', label: 'Stop-Loss %', sub: 'Auto-Close bei Verlust', def: 5, min: 0.1, max: 50, step: 0.5 },
+            { key: 'take_profit_pct', label: 'Take-Profit %', sub: 'Auto-Close bei Gewinn', def: 10, min: 0.1, max: 200, step: 0.5 },
+            { key: 'max_daily_loss_pct', label: 'Max. Tages-Verlust %', sub: 'Pause nach X%/Tag', def: 15, min: 1, max: 100, step: 1 },
+          ].map(({ key, label, sub, def, min, max, step }) => (
+            <div key={key}>
+              <label className="block text-xs text-slate-400 mb-1">
+                {label}
+                <span className="text-slate-600 ml-1 normal-case">({sub})</span>
+              </label>
+              <input
+                type="number"
+                min={min}
+                max={max}
+                step={step}
+                value={Number(config[key] ?? def)}
+                onChange={(e) => onChange({ ...config, [key]: Number(e.target.value) })}
+                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-2 py-2 text-white text-sm focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-amber-700/80 bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2">
+          ⚠️ Der Bot spiegelt nur Positionen auf dem konfigurierten Pair. Trader müssen öffentliche Positionen auf Binance freigegeben haben.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── BotsPage ───────────────────────────────────────────────────────────────────
 
 export function BotsPage() {
   const navigate = useNavigate()
@@ -209,6 +488,14 @@ export function BotsPage() {
                   />
                 </div>
               </div>
+
+              {/* Copy Trading Config */}
+              {form.type === 'copy_trading' && (
+                <CopyTradingConfig
+                  config={form.config as Record<string, unknown>}
+                  onChange={(updated) => setForm({ ...form, config: updated })}
+                />
+              )}
 
               {/* Indicator Selection & Config — only shown for rule_based */}
               {form.type === 'rule_based' && (

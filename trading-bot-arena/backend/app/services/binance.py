@@ -209,6 +209,7 @@ async def get_historical_candles(
 
 _BINANCE_LEADERBOARD_BASE = "https://www.binance.com/bapi/futures/v1/public/future/leaderboard"
 _BINANCE_LB_V2 = "https://www.binance.com/bapi/futures/v2/public/future/leaderboard"
+_BINANCE_LB_V3 = "https://www.binance.com/bapi/futures/v3/public/future/leaderboard"
 
 # Cache for leaderboard list (5-minute TTL)
 _leaders_cache: dict[str, tuple[float, list]] = {}
@@ -242,7 +243,9 @@ async def get_copy_trading_leaders(
     if cached and (now - cached[0]) < _LEADERS_CACHE_TTL_S:
         return cached[1]
 
-    # Proper browser headers — required to pass Cloudflare on Binance
+    # Proper browser headers — required to pass Cloudflare on Binance.
+    # The cid cookie is set by Binance on page load; any short alphanumeric
+    # value is accepted for the public leaderboard endpoint.
     headers = {
         "Content-Type": "application/json",
         "User-Agent": (
@@ -253,7 +256,8 @@ async def get_copy_trading_leaders(
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "Origin": "https://www.binance.com",
-        "Referer": "https://www.binance.com/en/copy-trading",
+        "Referer": "https://www.binance.com/en/futures-activity/leaderboard",
+        "Cookie": "cid=tba12345",
         "clienttype": "web",
         "lang": "en",
     }
@@ -264,17 +268,17 @@ async def get_copy_trading_leaders(
 
     body = {
         "isTrader": False,
+        "isShared": True,
         "statisticsType": sort_by,
         "tradeType": "PERPETUAL",
         "periodType": binance_period,
-        "dataType": "TRADE",
     }
 
-    # Try endpoints in priority order
+    # Try endpoints in priority order (v3 is the current working URL as of 2025)
     endpoints = [
+        ("POST", f"{_BINANCE_LB_V3}/getLeaderboardRank"),
         ("POST", f"{_BINANCE_LB_V2}/getLeaderboardRank"),
         ("POST", f"{_BINANCE_LEADERBOARD_BASE}/getLeaderboardRank"),
-        ("GET",  f"{_BINANCE_LEADERBOARD_BASE}/getLeaderboardRank"),
     ]
 
     last_error = "unknown"
@@ -321,7 +325,9 @@ async def get_copy_trading_leaders(
                 return leaders
 
             except httpx.HTTPStatusError as exc:
-                last_error = f"HTTPStatusError {exc.response.status_code}: {url}"
+                # Log the first ~200 chars of response body for debugging
+                body_preview = exc.response.text[:200] if exc.response else ""
+                last_error = f"HTTP {exc.response.status_code} from {url}: {body_preview}"
                 logger.warning(f"Leaderboard endpoint failed: {last_error}")
             except httpx.ConnectError as exc:
                 last_error = f"ConnectError: {exc}"

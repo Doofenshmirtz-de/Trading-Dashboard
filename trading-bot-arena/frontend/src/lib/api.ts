@@ -18,7 +18,6 @@ import type {
   BacktestRequest,
   BacktestResult,
   BacktestResultsResponse,
-  CopyLeadersResponse,
 } from '../types'
 
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -293,18 +292,6 @@ export interface ComparisonResponse {
 
 export function fetchComparison(): Promise<ComparisonResponse> {
   return apiFetch<ComparisonResponse>('/bots/comparison/all')
-}
-
-// ── Phase 4: Copy Trading ─────────────────────────────────────────────────────
-
-export function fetchCopyLeaders(
-  sortBy: 'ROI' | 'PNL' = 'ROI',
-  period: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ALL' = 'MONTHLY',
-  limit = 20,
-): Promise<CopyLeadersResponse> {
-  return apiFetch<CopyLeadersResponse>(
-    `/market/copy-trading/leaders?sort_by=${sortBy}&period=${period}&limit=${limit}`,
-  )
 }
 
 // ── Phase 4: Backtesting ──────────────────────────────────────────────────────

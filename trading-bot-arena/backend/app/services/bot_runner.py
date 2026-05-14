@@ -26,9 +26,8 @@ from postgrest.exceptions import APIError
 from app.core.bot_base import Candle
 from app.core.bots import BotFactory
 from app.core.bots.rsi_bot import RSIBot
-from app.core.bots.copy_trading_bot import CopyTradingBot
 from app.core.portfolio_engine import VirtualPortfolioEngine
-from app.services.binance import get_candles, get_copy_leader_positions
+from app.services.binance import get_candles
 from app.services.supabase import get_supabase_client
 
 logger = logging.getLogger("trading_bot_arena")
@@ -66,9 +65,6 @@ def _make_bot(bot_type: str, bot_id: str, config: dict, virtual_balance: float):
         except ValueError as e:
             raise ValueError(f"Unsupported indicator: {indicator}. "
                            f"Available: {BotFactory.list_available()}") from e
-
-    if bot_type == "copy_trading":
-        return CopyTradingBot(bot_id=bot_id, config=config, virtual_balance=virtual_balance)
 
     raise ValueError(f"Unsupported bot type for sandbox execution: {bot_type!r}")
 
@@ -290,18 +286,6 @@ class BotRunner:
 
         candle = _row_to_candle(raw[-2])
         current_price = float(raw[-1]["close"] if isinstance(raw[-1], dict) else raw[-1][4])  # latest close for snapshot
-
-        # Inject leader state for Copy Trading bots before calling on_candle
-        if isinstance(bot, CopyTradingBot):
-            portfolio_id = entry["config"].get("leader_portfolio_id", "")
-            if portfolio_id:
-                leader_state = await get_copy_leader_positions(portfolio_id, pair)
-                bot.set_leader_state(
-                    has_position=leader_state["has_position"],
-                    api_error=leader_state.get("error"),
-                )
-            else:
-                bot.set_leader_state(has_position=False, api_error="No leader_portfolio_id configured")
 
         # Feed candle to bot
         signal = bot.on_candle(candle)

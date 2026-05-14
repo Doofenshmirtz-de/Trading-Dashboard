@@ -262,16 +262,17 @@ Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
 | Phase 1 | Fundament (Auth, DB, Deployment) | ✅ Abgeschlossen |
 | Phase 2 | Backend + Dashboard UI | ✅ Abgeschlossen |
 | Phase 3 | Sandbox Engine + Vergleich | 🔄 96% — Monitoring + Bot-4-Feinschliff offen |
-| Phase 4 | Copy Trading + Backtesting Engine | 🔄 90% — beide Schritte implementiert, Deploy ausstehend |
+| Phase 4 | Backtesting Engine | ✅ Abgeschlossen — Copy Trading entfernt (EU/DE Geo-Sperre) |
 | Phase 5 | Live Trading | 🔲 Geplant (nach Phase 4) |
 
 ---
 
-## 9. Phase 4 — Copy Trading + Backtesting Engine
+## 9. Phase 4 — Backtesting Engine
 
 ### Ziel
 - Backtesting-Engine: Bestehende Strategien (RSI, MACD, Bollinger) gegen historische OHLCV-Daten testen
-- Copy Trading Bot: Trades eines externen Traders automatisch nachbilden (paper-trading first)
+
+> **Hinweis:** Copy Trading (Schritt 2) wurde vollständig entfernt. Binance sperrt Copy-Trading-API-Endpunkte für EU/Deutschland per Geo-Block (Railway-Server betroffen). Alle zugehörigen Frontend-Komponenten, Backend-Endpunkte und Bot-Klassen wurden am 15. Mai 2026 bereinigt.
 
 ---
 
@@ -303,31 +304,17 @@ Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
 
 ---
 
-### Schritt 2 — Copy Trading Bot ✅ Abgeschlossen (15. Mai 2026)
+### Schritt 2 — Copy Trading Bot ❌ Entfernt (15. Mai 2026)
 
-**Konzept:** Bot spiegelt Positionen eines Binance Lead Traders (öffentliches Leaderboard API).
+**Grund:** Binance sperrt alle relevanten Copy-Trading-Leaderboard-API-Endpunkte für EU/Deutschland-Server per Geo-Block. Alle Endpunkte (`/v1`, `/v2`, `/v3 getLeaderboardRank`) gaben konsistent HTTP 404 zurück. Da Railway-Server in der EU laufen und Copy Trading in Deutschland regulatorisch verboten ist, wurde das Feature vollständig entfernt.
 
-**Backend:**
-- [x] `CopyTradingBot` Klasse (`backend/app/core/bots/copy_trading_bot.py`)
-  - Pollt Leader-Positionsstate per `set_leader_state()` (injiziert durch BotRunner vor `on_candle()`)
-  - Stop-Loss: Auto-SELL wenn Position X% im Minus (config: `stop_loss_pct`, default 5%)
-  - Take-Profit: Auto-SELL wenn Position X% im Plus (config: `take_profit_pct`, default 10%)
-  - Max Daily Loss: Bot pausiert bis nächsten UTC-Tag wenn kumulierter Tagesverlust > X% (config: `max_daily_loss_pct`, default 15%)
-  - Kein Warm-up nötig (Leader-State-basiert, nicht Indikator-basiert)
-- [x] `binance.get_copy_leader_positions(portfolio_id, pair)` — Binance Leaderboard API (öffentlich, kein Auth)
-  - Zweistufig: `getLeaderboardRank` → `encryptedUid` → `getOtherPosition`
-  - 30s Position-Cache um API-Rate-Limits zu schonen
-  - Graceful Fallback: bei API-Fehler → `has_position=False` + Error-Meldung ins Signal
-- [x] BotRunner: `copy_trading` Bot-Typ unterstützt, Leader-Polling in `_tick_bot`
-- [x] Kein Warm-up für Copy Trading Bots (Warm-up nur für `rule_based`)
-
-**Frontend:**
-- [x] Copy Trading Config-Block im CreateBotModal (`BotsPage.tsx`)
-  - **Leader-Browser**: Binance Leaderboard direkt im Modal (sortierbar nach ROI/PnL, Zeitraum WEEKLY/MONTHLY/ALL)
-  - **Zufällig-Button**: wählt zufällig einen Trader aus der Top-20-Liste
-  - **Manuelle Eingabe**: Tab für direkte Portfolio-ID-Eingabe (Fallback)
-  - Tick-Intervall, Stop-Loss %, Take-Profit %, Max-Tages-Verlust % als Eingabefelder
-  - `GET /market/copy-trading/leaders` — neuer Backend-Endpoint mit 5min Cache
+**Entfernte Komponenten:**
+- `CopyTradingBot` Klasse gelöscht
+- `get_copy_trading_leaders()` + `get_copy_leader_positions()` aus `binance.py` entfernt
+- `GET /market/copy-trading/leaders` Endpunkt aus `market.py` entfernt
+- `CopyTradingConfig` Komponente aus `BotsPage.tsx` entfernt
+- `copy_trading` Bot-Typ aus Frontend-Dropdown entfernt
+- `CopyLeader`, `CopyLeadersResponse` Typen aus `types/index.ts` entfernt
 
 ---
 

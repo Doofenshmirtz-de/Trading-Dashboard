@@ -4,9 +4,9 @@
 ---
 
 ## 1. Projekt-Status
-**Phase 3 — Sandbox Engine (93% abgeschlossen)**
+**Phase 3 — Sandbox Engine (96% abgeschlossen)**
 Live auf Vercel + Railway + Supabase. Bots laufen, generieren Signale und tracken Performance.
-Offen: letzte Stabilitäts- und Datenqualitätsarbeiten (started_at-Migration live, Rest-Ausreißer prüfen).
+Offen: Abschluss-Monitoring und Bot-4-Strategiefeinschliff.
 
 ---
 
@@ -187,26 +187,34 @@ trading-bot-arena/
 
 ## 5. Offene To-dos (nächste 3 konkrete Schritte)
 
-### Schritt 1 — `started_at` in Prod finalisieren 🔴
-**Problem:** `PATCH /bots/{id}` schlug mit 500 fehl, wenn `started_at` im PostgREST Schema-Cache fehlte.
-**Status:** Code-Fallback ist aktiv, aber DB-Migration muss live final sauber gesetzt werden.
+### Schritt 1 — Bot-4 Strategiefeinschliff (1m RSI) 🟡
+**Problem:** Sehr hoher `hold`-Anteil (`1287/1438` in 24h), wenig Ausführungen.
+**Ziel:** Trades qualitativ verbessern, ohne Overtrading zu erzeugen.
 **Fix:**
-- `ALTER TABLE ... ADD COLUMN started_at` in Supabase ausführen
-- `NOTIFY pgrst, 'reload schema'` ausführen
-- Start/Stop-Endpunkte danach aktiv verifizieren
+- RSI-Parameter für 1m prüfen/kalibrieren (Schwellen + Period)
+- Trade-Trigger gegen Position-State matchen
+- 24h Vergleich vorher/nachher dokumentieren
 
-### Schritt 2 — Historische Snapshot-Ausreißer final bereinigen 🟡
+### Schritt 2 — Restliche Snapshot-Ausreißer prüfen 🟡
 **Status:** Für Bot 3 (`5cb9...`) bereits bereinigt + verifiziert.
 **Offen:**
 - Restliche Bots auf Alt-Ausreißer prüfen
 - Bei Bedarf mit Backup-Tabelle gezielt bereinigen
 
-### Schritt 3 — Bot-4 Trade-Execution analysieren 🟡
-**Beobachtung:** Sehr viele Signale, aber zeitweise kaum Trades.
-**Nächster Check:**
-- Signal-Verteilung (`hold/buy/sell`) pro 24h
-- Engine-State-Fälle prüfen (`buy` bei offener Position, `sell` ohne Position)
-- Falls nötig RSI-Parameter für 1m anpassen (weniger Noise, klarere Trigger)
+### Schritt 3 — 24h Stabilitätsbeobachtung 🟢
+**Ziel:** Phase-3-Abnahme mit Monitoring absichern.
+**Checks:**
+- Scheduler tickt durchgehend
+- Snapshots kommen pro Timeframe erwartbar
+- Keine neuen 500er bei Start/Stop
+
+### Schritt 4 — `started_at` in Prod finalisieren 🔴 (abgeschlossen)
+**Problem:** `PATCH /bots/{id}` schlug mit 500 fehl, wenn `started_at` im PostgREST Schema-Cache fehlte.
+**Status:** ✅ SQL ausgeführt, Backfill erfolgreich, Start/Stop wieder stabil.
+**Fix:**
+- `ALTER TABLE ... ADD COLUMN started_at` in Supabase ausführen
+- `NOTIFY pgrst, 'reload schema'` ausführen
+- Start/Stop-Endpunkte danach aktiv verifizieren
 
 ---
 
@@ -214,10 +222,10 @@ trading-bot-arena/
 
 | # | Schwere | Problem | Wahrscheinliche Ursache | Status |
 |---|---|---|---|---|
-| 1 | 🔴 Kritisch | `started_at` fehlte im Schema-Cache | PostgREST Cache nach Migration nicht aktualisiert | In Arbeit (Fallback im Code aktiv) |
+| 1 | 🟢 Behoben | `started_at` fehlte im Schema-Cache | PostgREST Cache nach Migration nicht aktualisiert | Behoben (Migration + Backfill + Reload) |
 | 2 | 🟢 Behoben | Regime zeigt "Unknown" | ADX-Berechnung + Fallback waren unvollständig | Behoben |
 | 3 | 🟡 Mittel | Bot 4: -32.92% PnL | Möglicherweise zu aggressives Trading bei 1m Timeframe mit engen RSI-Grenzen (45/55) | Erwartet, aber prüfen |
-| 4 | 🟡 Mittel | "Time online: 0m" | `started_at` war null bei Alt-Bots | In Arbeit (Backfill-SQL vorhanden) |
+| 4 | 🟢 Behoben | "Time online: 0m" | `started_at` war null bei Alt-Bots | Behoben (Backfill ausgeführt) |
 | 5 | 🟢 Behoben | Snapshot-Stopp seit 30. Apr. | Scheduler-Startup/Robustness unvollständig | Behoben |
 | 6 | 🟢 Behoben | Comparison Dashboard fehlt | Noch nicht implementiert | Behoben |
 | 7 | 🟢 Gering | Copy Trading Bot hat keine Logik | Placeholder-Status in DB, keine BotRunner-Implementierung | Bekannt, Phase 4 |
@@ -253,7 +261,7 @@ Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
 |---|---|---|
 | Phase 1 | Fundament (Auth, DB, Deployment) | ✅ Abgeschlossen |
 | Phase 2 | Backend + Dashboard UI | ✅ Abgeschlossen |
-| Phase 3 | Sandbox Engine + Vergleich | 🔄 93% — Stabilisierung/DB-Feinschliff offen |
+| Phase 3 | Sandbox Engine + Vergleich | 🔄 96% — Monitoring + Bot-4-Feinschliff offen |
 | Phase 4 | Erweiterte Analytik + ML Bot | 🔲 Geplant |
 | Phase 5 | Live Trading | 🔲 Geplant (nach Phase 4) |
 

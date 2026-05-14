@@ -1,7 +1,6 @@
-# Trading Bot Arena — Haupt-Bauplan
-> Quelle: `~/Documents/projektplan.md`  
-> In dieses Repository integriert am: 14. Mai 2026  
-> Dieses Dokument ist der zentrale Fortschritts- und Maßnahmenplan.
+# Trading Bot Arena — Tageslog (14. Mai 2026)
+> Arbeitsjournal für heutige Änderungen.
+> Der vollständige Master-Plan liegt in `projektplan.md`.
 
 ---
 
@@ -54,9 +53,9 @@
 ## Offene Aufgaben (Priorität)
 
 ### P0 — Sofort
-- [ ] Supabase-Migration für `started_at` in Produktion ausführen
-- [ ] PostgREST Schema-Cache nach Migration reloaden
-- [ ] Verifizieren: Bot Stop/Start ohne 500er
+- [x] Supabase-Migration für `started_at` in Produktion ausführen
+- [x] PostgREST Schema-Cache nach Migration reloaden
+- [x] Verifizieren: Bot Stop/Start ohne 500er
 
 ### P1 — Datenqualität
 - [~] Alte korrupte Snapshot-/Balance-Werte bereinigen (für Bot `5cb9...` erledigt und verifiziert; Restbots weiter prüfen)
@@ -94,10 +93,14 @@ ORDER BY latest_snapshot DESC;
 
 ---
 
-## Definition of Done (nahe Zukunft)
+## Ergebnis heute
 
-- [ ] Bots lassen sich zuverlässig starten/stoppen (ohne 500).
-- [ ] Equity Curve zeigt in allen Timeframes realistische Verläufe.
-- [ ] Scheduler tickt stabil und schreibt kontinuierlich Snapshots.
-- [ ] Keine kritischen TypeScript- oder Runtime-Fehler mehr.
+- [x] Bots lassen sich wieder zuverlässig starten/stoppen (ohne 500).
+- [x] Equity Curve zeigt nach Cleanup realistische Verläufe.
+- [x] Scheduler tickt stabil und schreibt kontinuierlich Snapshots.
+- [x] Keine kritischen TypeScript-Fehler in den geänderten Komponenten.
+
+Offen für morgen:
+- Bot-4-Parameterfeinschliff (hoher Hold-Anteil auf 1m).
+- 24h Monitoring zur finalen Phase-3-Abnahme.
 

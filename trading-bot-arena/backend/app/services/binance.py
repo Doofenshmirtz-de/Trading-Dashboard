@@ -262,42 +262,45 @@ async def get_copy_trading_leaders(
         "lang": "en",
     }
 
-    # Binance periodType mapping ("ALL" is not a valid value — use "TOTAL" as fallback)
+    # Binance periodType mapping
+    # "TOTAL" = all-time in Binance API, also try MONTHLY as fallback
     period_map = {"DAILY": "DAILY", "WEEKLY": "WEEKLY", "MONTHLY": "MONTHLY", "ALL": "TOTAL"}
     binance_period = period_map.get(period, "MONTHLY")
 
-    body = {
-        "isTrader": False,
-        "isShared": True,
-        "statisticsType": sort_by,
-        "tradeType": "PERPETUAL",
-        "periodType": binance_period,
-    }
+    # Try multiple body variants — isShared/isTrader behaviour differs by endpoint version
+    body_variants = [
+        # Variant 1: standard (isShared=True filters to traders who share positions)
+        {"tradeType": "PERPETUAL", "statisticsType": sort_by, "periodType": binance_period, "isShared": True, "isTrader": False},
+        # Variant 2: without isShared (broader result set)
+        {"tradeType": "PERPETUAL", "statisticsType": sort_by, "periodType": binance_period, "isTrader": False},
+        # Variant 3: MONTHLY fallback if TOTAL returns empty
+        {"tradeType": "PERPETUAL", "statisticsType": sort_by, "periodType": "MONTHLY", "isShared": True, "isTrader": False},
+        # Variant 4: MONTHLY without isShared
+        {"tradeType": "PERPETUAL", "statisticsType": sort_by, "periodType": "MONTHLY", "isTrader": False},
+    ]
 
-    # Try endpoints in priority order (v3 is the current working URL as of 2025)
-    endpoints = [
-        ("POST", f"{_BINANCE_LB_V3}/getLeaderboardRank"),
-        ("POST", f"{_BINANCE_LB_V2}/getLeaderboardRank"),
-        ("POST", f"{_BINANCE_LEADERBOARD_BASE}/getLeaderboardRank"),
+    # Deduplicate: if period is already MONTHLY, no need to repeat monthly variants
+    if binance_period == "MONTHLY":
+        body_variants = body_variants[:2]
+
+    # Try endpoints × body variants
+    attempts = [
+        (f"{_BINANCE_LB_V3}/getLeaderboardRank", bv)
+        for bv in body_variants
+    ] + [
+        (f"{_BINANCE_LB_V2}/getLeaderboardRank", body_variants[0]),
     ]
 
     last_error = "unknown"
     async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-        for method, url in endpoints:
+        for url, body in attempts:
             try:
-                if method == "POST":
-                    resp = await client.post(url, json=body, headers=headers)
-                else:
-                    params = {
-                        "isTrader": "false",
-                        "statisticsType": sort_by,
-                        "tradeType": "PERPETUAL",
-                        "periodType": binance_period,
-                    }
-                    resp = await client.get(url, params=params, headers=headers)
+                resp = await client.post(url, json=body, headers=headers)
 
                 logger.info(
-                    f"Leaderboard API attempt: {method} {url} → {resp.status_code}",
+                    f"Leaderboard API attempt: POST {url} "
+                    f"period={body.get('periodType')} isShared={body.get('isShared')} "
+                    f"→ {resp.status_code}",
                 )
 
                 if resp.status_code != 200:
@@ -305,27 +308,31 @@ async def get_copy_trading_leaders(
                     continue
 
                 data = resp.json()
+                raw_preview = resp.text[:500]
+                logger.info(f"Leaderboard raw response preview: {raw_preview}")
 
                 if data.get("code") != "000000":
                     last_error = f"API code {data.get('code')}: {data.get('message')}"
-                    logger.warning(f"Leaderboard non-zero code: {last_error}")
+                    logger.warning(f"Leaderboard non-zero code: {last_error} | body: {raw_preview}")
                     continue
 
                 raw_list: list[dict] = data.get("data") or []
                 if not raw_list:
                     last_error = "empty data array in response"
+                    logger.warning(
+                        f"Leaderboard empty data — body={raw_preview} | sent={body}"
+                    )
                     continue
 
                 leaders = _parse_leaders(raw_list[:limit])
                 _leaders_cache[cache_key] = (now, leaders)
                 logger.info(
                     f"Copy trading leaders fetched: {len(leaders)} traders "
-                    f"(sort={sort_by}, period={period})"
+                    f"(sort={sort_by}, period={period}, variant={body})"
                 )
                 return leaders
 
             except httpx.HTTPStatusError as exc:
-                # Log the first ~200 chars of response body for debugging
                 body_preview = exc.response.text[:200] if exc.response else ""
                 last_error = f"HTTP {exc.response.status_code} from {url}: {body_preview}"
                 logger.warning(f"Leaderboard endpoint failed: {last_error}")

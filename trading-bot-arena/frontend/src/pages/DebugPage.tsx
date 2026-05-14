@@ -743,8 +743,8 @@ function BinanceLeaderboardSection() {
             </div>
           )}
 
-          {/* Raw response */}
-          <details>
+          {/* Raw response — auto-open when 0 traders for debugging */}
+          <details open={leadersFound === 0}>
             <summary className="text-[11px] text-slate-500 cursor-pointer hover:text-slate-300 select-none">
               Raw Response anzeigen
             </summary>
@@ -752,7 +752,7 @@ function BinanceLeaderboardSection() {
               <p className="mt-2 text-red-400 text-xs font-mono bg-slate-950 rounded p-3">{result.error}</p>
             ) : (
               <pre
-                className="mt-2 bg-slate-950 rounded px-4 py-3 text-[11px] font-mono overflow-auto max-h-72 leading-relaxed"
+                className="mt-2 bg-slate-950 rounded px-4 py-3 text-[11px] font-mono overflow-auto max-h-96 leading-relaxed"
                 dangerouslySetInnerHTML={{ __html: highlightJson(result.body) }}
               />
             )}

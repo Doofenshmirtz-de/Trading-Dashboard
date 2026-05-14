@@ -215,6 +215,7 @@ export function BotDetail() {
     : (snapshots.length > 0 ? snapshots[snapshots.length - 1] : null)
   const config = (bot?.config as Record<string, unknown> | undefined) ?? {}
   const lastSignal = signals.length > 0 ? signals[0] : null
+  const onlineSince = bot?.started_at ?? bot?.updated_at
   const debugHint =
     bot?.status === 'running' && signals.length === 0
       ? 'Bot läuft, aber keine Signale vorhanden. Prüfe Railway Logs auf Tick-Fehler.'
@@ -357,7 +358,7 @@ export function BotDetail() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
               <p className="text-xs text-slate-400 mb-1">Time online</p>
-              <p className="text-sm text-white font-medium">{fmtDurationSince(bot?.started_at)}</p>
+              <p className="text-sm text-white font-medium">{fmtDurationSince(onlineSince)}</p>
             </div>
             <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
               <p className="text-xs text-slate-400 mb-1">Signals (geladen)</p>

@@ -1,99 +1,262 @@
-# Trading Bot Arena — Haupt-Bauplan
-> Quelle: `~/Documents/projektplan.md`  
-> In dieses Repository integriert am: 14. Mai 2026  
-> Dieses Dokument ist der zentrale Fortschritts- und Maßnahmenplan.
+# Trading Bot Arena — Projektplan
+> Zuletzt aktualisiert: 14. Mai 2026
 
 ---
 
-## Aktueller Gesamtstatus
-
-**Phase 3 (Sandbox Engine): ~90%**
-
-**Live-Stack:** Vercel (Frontend) + Railway (Backend) + Supabase (DB/Auth)
-
-### Stand heute
-- Scheduler läuft wieder und tickt minütlich.
-- Regime-Service liefert wieder valide Regime-Werte.
-- Comparison Dashboard ist implementiert.
-- Kritische Restpunkte: DB-Migration `started_at` live ausrollen + Datenbereinigung alter Snapshot-Ausreißer.
+## 1. Projekt-Status
+**Phase 3 — Sandbox Engine (93% abgeschlossen)**
+Live auf Vercel + Railway + Supabase. Bots laufen, generieren Signale und tracken Performance.
+Offen: letzte Stabilitäts- und Datenqualitätsarbeiten (started_at-Migration live, Rest-Ausreißer prüfen).
 
 ---
 
-## Fortschritts-Log (laufend aktualisieren)
+## 2. Kernziele
+- Eine strukturierte **Multi-Bot Paper-Trading-Plattform** für Binance Futures
+- Beliebig viele Bot-Instanzen laufen parallel mit virtuellem Kapital
+- Strategien werden objektiv verglichen bevor echtes Geld eingesetzt wird
+- **Du entscheidest — immer.** Kein blindes Kopieren, volle Transparenz
 
-### 2026-05-14 (spät)
-
-#### Backend
-- `FastAPI lifespan` + Scheduler-Hardening aktiv.
-- `/debug/tick-status` und `/debug/trigger-tick` hinzugefügt.
-- Tick-Loop robust gegen Bot-Fehler gemacht.
-- Regime-ADX-Berechnung ersetzt (Wilder smoothing, validierter Ablauf).
-- Performance-PnL auf Snapshot-Basis vereinheitlicht.
-- **Fix Stop-Bug vorbereitet:** Fallback eingebaut, wenn `started_at` noch nicht im Supabase-Schema-Cache verfügbar ist.
-
-#### Frontend
-- Equity Curve: Timeframe-Buttons 1D / 1W / 1M / ALL.
-- Drawdown-Achse gepolstert (kein Abschneiden mehr).
-- X-Achsen-Tick-Dichte verbessert.
-- Stale-Data-Warnung eingebaut.
-- BotDetail: „Time online“ auf `started_at` umgestellt.
-- Comparison Dashboard (Tabelle, Chart, Korrelation) eingebaut.
-
-#### Neu aus aktuellem Incident (Logs)
-- **Stoppen von Bots schlug fehl (`PATCH /bots/{id}` 500)** wegen:
-  - `PGRST204: started_at column missing in schema cache`
-- **Fix im Code:** defensive Retry-Logik ohne `started_at`, damit Statuswechsel nicht mehr blockiert.
-- **Chart-Bug (nur 1W realistisch):** Backend-Snapshot-Endpoint auf echtes Zeitfenster umgestellt (rolling window statt nur „letzte N Reihen“), plus Ausreißer-Filter für alte korrupte Snapshot-Werte.
+### Bot-Typen (geplant)
+| Typ | Status |
+|---|---|
+| RSI (Rule Based) | ✅ Live |
+| MACD | ✅ Implementiert |
+| Bollinger Band | ✅ Implementiert |
+| Copy Trading | ⚠️ UI vorhanden, keine Logik |
+| ML/AI | 🔲 Phase 4 |
+| Custom | 🔲 Phase 4 |
 
 ---
 
-## Offene Aufgaben (Priorität)
+## 3. Aktuelle Dateistruktur
 
-### P0 — Sofort
-- [ ] Supabase-Migration für `started_at` in Produktion ausführen
-- [ ] PostgREST Schema-Cache nach Migration reloaden
-- [ ] Verifizieren: Bot Stop/Start ohne 500er
-
-### P1 — Datenqualität
-- [ ] Alte korrupte Snapshot-/Balance-Werte bereinigen
-- [ ] Bot 4/3 historisch prüfen (negative Balance / Ausreißer)
-
-### P2 — Stabilität
-- [ ] Beobachten, ob alle laufenden Bots weiterhin Snapshots/Trades schreiben
-- [ ] Railway Logs: Tick jede Minute + keine Scheduler-Error-Spikes
-
----
-
-## Operative SQL-Kommandos (Prod)
-
-```sql
--- 1) started_at Spalte anlegen (idempotent)
-ALTER TABLE bots
-ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-
--- 2) PostgREST Schema-Cache reload
-NOTIFY pgrst, 'reload schema';
-
--- 3) Korrupt hohe Balances zurücksetzen
-UPDATE bots
-SET virtual_balance = initial_balance,
-    updated_at = NOW()
-WHERE virtual_balance > 100000
-  AND initial_balance <= 10000;
-
--- 4) Prüfen, ob wieder neue Snapshots ankommen
-SELECT bot_id, MAX(timestamp) AS latest_snapshot
-FROM bot_snapshots
-GROUP BY bot_id
-ORDER BY latest_snapshot DESC;
+```
+trading-bot-arena/
+├── frontend/                          # Vite + React 18 + TypeScript + Tailwind
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── auth/
+│   │   │   │   ├── LoginForm.tsx      ✅
+│   │   │   │   └── SignUpForm.tsx     ✅
+│   │   │   ├── charts/
+│   │   │   │   ├── EquityCurve.tsx    ✅
+│   │   │   │   └── DrawdownChart.tsx  ✅
+│   │   │   ├── layout/
+│   │   │   │   ├── Navbar.tsx         ✅
+│   │   │   │   └── ProtectedRoute.tsx ✅
+│   │   │   ├── bots/
+│   │   │   │   └── CreateBotModal.tsx ✅
+│   │   │   ├── market/
+│   │   │   │   └── RegimeWidget.tsx   ⚠️ (zeigt "Unknown")
+│   │   │   └── ui/
+│   │   │       ├── Toast.tsx          ✅
+│   │   │       └── StatusBadge.tsx    ✅
+│   │   ├── context/
+│   │   │   └── AuthContext.tsx        ✅
+│   │   ├── lib/
+│   │   │   ├── supabase.ts            ✅
+│   │   │   ├── api.ts                 ✅ (retry logic, JWT)
+│   │   │   └── requestLog.ts          ✅
+│   │   ├── pages/
+│   │   │   ├── Login.tsx              ✅
+│   │   │   ├── SignUp.tsx             ✅
+│   │   │   └── dashboard/
+│   │   │       ├── Dashboard.tsx      ✅
+│   │   │       ├── Overview.tsx       ✅
+│   │   │       ├── Bots.tsx           ✅
+│   │   │       ├── BotDetail.tsx      ✅
+│   │   │       ├── Markets.tsx        ✅
+│   │   │       ├── Debug.tsx          ✅
+│   │   │       └── Comparison.tsx     🔲 fehlt noch
+│   │   └── types/
+│   │       └── index.ts               ✅
+│   ├── vercel.json                    ✅
+│   └── .env.example                   ✅
+│
+├── backend/                           # FastAPI + Python 3.11
+│   ├── app/
+│   │   ├── main.py                    ✅ (APScheduler, lifespan)
+│   │   ├── config.py                  ✅
+│   │   ├── dependencies.py            ✅ (JWT Guard)
+│   │   ├── routers/
+│   │   │   ├── health.py              ✅ (latency_ms, last_error)
+│   │   │   ├── bots.py                ✅ (CRUD + trades/snapshots/signals)
+│   │   │   └── market.py              ✅ (pairs, candles, ticker, regime)
+│   │   ├── models/
+│   │   │   ├── bot.py                 ✅ (transitions, validation)
+│   │   │   └── market.py              ✅
+│   │   ├── services/
+│   │   │   ├── supabase.py            ✅
+│   │   │   ├── binance.py             ✅ (ccxt, 1h cache)
+│   │   │   ├── bot_runner.py          ✅ (tick, start/stop, warm-up)
+│   │   │   ├── bot_manager.py         ✅
+│   │   │   └── regime_service.py      ⚠️ (ADX liefert "Unknown")
+│   │   └── core/
+│   │       ├── bot_base.py            ✅
+│   │       ├── portfolio_engine.py    ✅ (slippage, fees)
+│   │       ├── logging.py             ✅ (JSON structured)
+│   │       ├── exceptions.py          ✅
+│   │       └── bots/
+│   │           ├── rsi_bot.py         ✅
+│   │           ├── macd_bot.py        ✅
+│   │           └── bollinger_bot.py   ✅
+│   ├── tests/
+│   │   ├── conftest.py                ✅
+│   │   ├── test_health.py             ✅
+│   │   ├── test_bots.py               ✅
+│   │   └── test_market.py             ✅
+│   ├── Dockerfile                     ✅
+│   ├── railway.toml                   ✅
+│   └── requirements.txt               ✅
+│
+└── README.md                          ✅
 ```
 
 ---
 
-## Definition of Done (nahe Zukunft)
+## 4. Erledigte Aufgaben
 
-- [ ] Bots lassen sich zuverlässig starten/stoppen (ohne 500).
-- [ ] Equity Curve zeigt in allen Timeframes realistische Verläufe.
-- [ ] Scheduler tickt stabil und schreibt kontinuierlich Snapshots.
-- [ ] Keine kritischen TypeScript- oder Runtime-Fehler mehr.
+### Infrastruktur
+- [x] Monorepo-Struktur (frontend/ + backend/)
+- [x] Vercel Deploy (Frontend)
+- [x] Railway Deploy (Backend FastAPI)
+- [x] Supabase (Postgres + Auth + RLS)
+- [x] Docker + railway.toml Konfiguration
+- [x] Structured JSON Logging auf Railway
+- [x] CORS korrekt konfiguriert
 
+### Authentifizierung
+- [x] Email + Passwort Auth via Supabase
+- [x] AuthContext mit onAuthStateChange + Cleanup
+- [x] ProtectedRoute mit Loading-State
+- [x] Session-Persistenz (kein Flash auf Reload)
+- [x] Redirect nach Login zur ursprünglichen Route
+- [x] Passwort Show/Hide Toggle
+- [x] Inline Error Messages (kein alert())
+
+### Backend API
+- [x] GET /health (Binance + Supabase latency + last_error)
+- [x] JWT-Verifikation (python-jose, alle Endpoints geschützt)
+- [x] Bot CRUD (GET, POST, PATCH, DELETE)
+- [x] Status-Transition-Validierung (stopped→paused verboten)
+- [x] GET /market/pairs (673 Binance Futures Pairs, 1h Cache)
+- [x] GET /market/candles
+- [x] GET /market/ticker
+- [x] GET /market/regime (⚠️ gibt Unknown zurück)
+- [x] GET /bots/{id}/trades
+- [x] GET /bots/{id}/snapshots
+- [x] GET /bots/{id}/signals
+- [x] GET /bots/{id}/performance (Sharpe, Drawdown, Win Rate)
+
+### Bot Engine
+- [x] BaseBot abstrakte Klasse (on_candle, get_config_schema)
+- [x] VirtualPortfolioEngine (Slippage 0.05%, Fee 0.04%, Position Sizing)
+- [x] RSIBot (Wilder's RSI, Crossover-Logik, warm-up)
+- [x] MACDBot (EMA from scratch, Signal Line Crossover)
+- [x] BollingerBot (Population StdDev, Band Break Signals)
+- [x] BotRunner (tick every 1min, start/stop, load on startup)
+- [x] APScheduler Integration (max_instances=1)
+- [x] Signale in bot_signals gespeichert
+- [x] Trades in bot_trades gespeichert
+- [x] Snapshots in bot_snapshots gespeichert
+
+### Frontend Dashboard
+- [x] Overview mit Stat Cards (Total Bots, Running, Stopped)
+- [x] Recent Bots Liste
+- [x] System Status Widget (Binance + Supabase latency)
+- [x] Markets Page (673 Pairs, Live Ticker, Suche, Pagination)
+- [x] Bots Page (Liste, Stop/Start, Delete, + New Bot Modal)
+- [x] Bot Detail Page (PnL, Win Rate, Sharpe, Max DD)
+- [x] Equity Curve Chart (recharts AreaChart, rot/grün)
+- [x] Drawdown Chart (immer ≤ 0)
+- [x] Signal Log (50 Signale, 60s auto-refresh)
+- [x] Trade History (BUY/SELL Badges, PnL on SELL)
+- [x] Debug Panel (Environment, Connection Tests, JWT Inspector,
+      Request Log, Manual Endpoint Tester)
+- [x] RegimeWidget auf Overview (⚠️ zeigt "Unknown")
+- [x] CreateBotModal mit Config-Templates pro Bot-Typ
+
+### Datenbank (Supabase)
+- [x] bots Tabelle + RLS
+- [x] bot_trades Tabelle + RLS
+- [x] bot_snapshots Tabelle + RLS
+- [x] bot_signals Tabelle + RLS (inkl. macd_value, bb_upper/lower)
+- [x] updated_at Trigger auf bots
+
+---
+
+## 5. Offene To-dos (nächste 3 konkrete Schritte)
+
+### Schritt 1 — `started_at` in Prod finalisieren 🔴
+**Problem:** `PATCH /bots/{id}` schlug mit 500 fehl, wenn `started_at` im PostgREST Schema-Cache fehlte.
+**Status:** Code-Fallback ist aktiv, aber DB-Migration muss live final sauber gesetzt werden.
+**Fix:**
+- `ALTER TABLE ... ADD COLUMN started_at` in Supabase ausführen
+- `NOTIFY pgrst, 'reload schema'` ausführen
+- Start/Stop-Endpunkte danach aktiv verifizieren
+
+### Schritt 2 — Historische Snapshot-Ausreißer final bereinigen 🟡
+**Status:** Für Bot 3 (`5cb9...`) bereits bereinigt + verifiziert.
+**Offen:**
+- Restliche Bots auf Alt-Ausreißer prüfen
+- Bei Bedarf mit Backup-Tabelle gezielt bereinigen
+
+### Schritt 3 — Bot-4 Trade-Execution analysieren 🟡
+**Beobachtung:** Sehr viele Signale, aber zeitweise kaum Trades.
+**Nächster Check:**
+- Signal-Verteilung (`hold/buy/sell`) pro 24h
+- Engine-State-Fälle prüfen (`buy` bei offener Position, `sell` ohne Position)
+- Falls nötig RSI-Parameter für 1m anpassen (weniger Noise, klarere Trigger)
+
+---
+
+## 6. Bekannte Probleme / Bugs
+
+| # | Schwere | Problem | Wahrscheinliche Ursache | Status |
+|---|---|---|---|---|
+| 1 | 🔴 Kritisch | `started_at` fehlte im Schema-Cache | PostgREST Cache nach Migration nicht aktualisiert | In Arbeit (Fallback im Code aktiv) |
+| 2 | 🟢 Behoben | Regime zeigt "Unknown" | ADX-Berechnung + Fallback waren unvollständig | Behoben |
+| 3 | 🟡 Mittel | Bot 4: -32.92% PnL | Möglicherweise zu aggressives Trading bei 1m Timeframe mit engen RSI-Grenzen (45/55) | Erwartet, aber prüfen |
+| 4 | 🟡 Mittel | "Time online: 0m" | `started_at` war null bei Alt-Bots | In Arbeit (Backfill-SQL vorhanden) |
+| 5 | 🟢 Behoben | Snapshot-Stopp seit 30. Apr. | Scheduler-Startup/Robustness unvollständig | Behoben |
+| 6 | 🟢 Behoben | Comparison Dashboard fehlt | Noch nicht implementiert | Behoben |
+| 7 | 🟢 Gering | Copy Trading Bot hat keine Logik | Placeholder-Status in DB, keine BotRunner-Implementierung | Bekannt, Phase 4 |
+
+---
+
+## 7. Architektur-Überblick
+
+```
+Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
+                         ↓
+                  Binance API (ccxt)
+                  APScheduler (1min tick)
+                  BotRunner (in-memory)
+```
+
+### Tech Stack
+| Bereich | Technologie |
+|---|---|
+| Frontend | React 18 + Vite + TypeScript + Tailwind |
+| Backend | Python 3.11 + FastAPI |
+| Datenbank | Supabase (Postgres + Auth + RLS) |
+| Exchange | ccxt + Binance Futures |
+| Scheduler | APScheduler (in-process) |
+| Charts | Recharts |
+| Deployment | Vercel + Railway |
+
+---
+
+## 8. Phasen-Übersicht
+
+| Phase | Name | Status |
+|---|---|---|
+| Phase 1 | Fundament (Auth, DB, Deployment) | ✅ Abgeschlossen |
+| Phase 2 | Backend + Dashboard UI | ✅ Abgeschlossen |
+| Phase 3 | Sandbox Engine + Vergleich | 🔄 93% — Stabilisierung/DB-Feinschliff offen |
+| Phase 4 | Erweiterte Analytik + ML Bot | 🔲 Geplant |
+| Phase 5 | Live Trading | 🔲 Geplant (nach Phase 4) |
+
+---
+
+*Hinweis: `projektplan.md` ist der Master-Plan; `projektplan_heute.md` ist nur Tageslog/Arbeitsjournal.*

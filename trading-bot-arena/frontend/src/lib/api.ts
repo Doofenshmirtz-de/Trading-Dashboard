@@ -15,6 +15,9 @@ import type {
   SignalsResponse,
   BotPerformance,
   Snapshot,
+  BacktestRequest,
+  BacktestResult,
+  BacktestResultsResponse,
 } from '../types'
 
 export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? ''
@@ -289,4 +292,25 @@ export interface ComparisonResponse {
 
 export function fetchComparison(): Promise<ComparisonResponse> {
   return apiFetch<ComparisonResponse>('/bots/comparison/all')
+}
+
+// ── Phase 4: Backtesting ──────────────────────────────────────────────────────
+
+export function runBacktest(req: BacktestRequest): Promise<BacktestResult> {
+  return apiFetch<BacktestResult>('/backtest/run', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function fetchBacktestResults(limit = 20): Promise<BacktestResultsResponse> {
+  return apiFetch<BacktestResultsResponse>(`/backtest/results?limit=${limit}`)
+}
+
+export function fetchBacktestResult(id: string): Promise<BacktestResult> {
+  return apiFetch<BacktestResult>(`/backtest/results/${id}`)
+}
+
+export function deleteBacktestResult(id: string): Promise<void> {
+  return apiFetch<void>(`/backtest/results/${id}`, { method: 'DELETE' })
 }

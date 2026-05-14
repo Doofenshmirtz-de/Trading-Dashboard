@@ -25,7 +25,7 @@ from app.core.exceptions import (
     BotNotFoundError,
     UnauthorizedError,
 )
-from app.routers import health, bots, market
+from app.routers import health, bots, market, backtest
 from app.services.bot_runner import bot_runner, TIMEFRAME_SECONDS
 
 setup_logging()
@@ -136,6 +136,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 app.include_router(health.router)
 app.include_router(bots.router)
 app.include_router(market.router)
+app.include_router(backtest.router)
 
 
 @app.get("/")

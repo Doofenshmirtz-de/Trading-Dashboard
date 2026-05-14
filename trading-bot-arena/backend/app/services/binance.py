@@ -127,6 +127,85 @@ async def get_ticker(symbol: str) -> dict:
         raise BinanceUnavailableError(str(e)) from e
 
 
+async def get_historical_candles(
+    symbol: str,
+    timeframe: str,
+    since_ms: int,
+    until_ms: int,
+    max_candles: int = 3000,
+) -> list[dict]:
+    """
+    Fetch historical OHLCV data between since_ms and until_ms (epoch ms).
+    Paginates across multiple Binance requests (max 1000 per request).
+    """
+    if timeframe not in VALID_TIMEFRAMES:
+        raise ValueError(f"Invalid timeframe '{timeframe}'. Must be one of {VALID_TIMEFRAMES}")
+
+    exchange = _get_exchange()
+    all_candles: list[list] = []
+    current_since = since_ms
+    t0 = time.time()
+
+    while len(all_candles) < max_candles:
+        try:
+            batch = await exchange.fetch_ohlcv(
+                symbol, timeframe, since=current_since, limit=1000
+            )
+        except ccxt_async.NetworkError as e:
+            if all_candles:
+                logger.warning(
+                    "Network error during candle pagination — stopping early",
+                    extra={"error": str(e), "fetched_so_far": len(all_candles)},
+                )
+                break
+            raise BinanceUnavailableError(str(e)) from e
+        except Exception as e:
+            if all_candles:
+                logger.warning(
+                    "Error during candle pagination — stopping early",
+                    extra={"error": str(e), "fetched_so_far": len(all_candles)},
+                )
+                break
+            raise BinanceUnavailableError(str(e)) from e
+
+        if not batch:
+            break
+
+        filtered = [c for c in batch if c[0] <= until_ms]
+        all_candles.extend(filtered)
+
+        if len(filtered) < len(batch) or batch[-1][0] >= until_ms:
+            break
+
+        current_since = batch[-1][0] + 1
+
+        if len(all_candles) >= max_candles:
+            break
+
+    latency = int((time.time() - t0) * 1000)
+    logger.info(
+        "Historical candles fetched",
+        extra={
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "count": min(len(all_candles), max_candles),
+            "latency_ms": latency,
+        },
+    )
+
+    return [
+        {
+            "timestamp": c[0],
+            "open": c[1],
+            "high": c[2],
+            "low": c[3],
+            "close": c[4],
+            "volume": c[5],
+        }
+        for c in all_candles[:max_candles]
+    ]
+
+
 async def check_connectivity() -> tuple[bool, int | None, str | None]:
     import asyncio
 

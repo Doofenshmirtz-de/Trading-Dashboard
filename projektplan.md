@@ -262,8 +262,71 @@ Vercel (React)  ←→  Railway (FastAPI)  ←→  Supabase (Postgres)
 | Phase 1 | Fundament (Auth, DB, Deployment) | ✅ Abgeschlossen |
 | Phase 2 | Backend + Dashboard UI | ✅ Abgeschlossen |
 | Phase 3 | Sandbox Engine + Vergleich | 🔄 96% — Monitoring + Bot-4-Feinschliff offen |
-| Phase 4 | Erweiterte Analytik + ML Bot | 🔲 Geplant |
+| Phase 4 | Copy Trading + Backtesting Engine | 🔄 In Bearbeitung |
 | Phase 5 | Live Trading | 🔲 Geplant (nach Phase 4) |
+
+---
+
+## 9. Phase 4 — Copy Trading + Backtesting Engine
+
+### Ziel
+- Backtesting-Engine: Bestehende Strategien (RSI, MACD, Bollinger) gegen historische OHLCV-Daten testen
+- Copy Trading Bot: Trades eines externen Traders automatisch nachbilden (paper-trading first)
+
+---
+
+### Schritt 1 — Backtesting Engine 🔄 In Bearbeitung
+
+**Backend (`/backtest`):**
+- [ ] `POST /backtest/run` — Nimmt `bot_type`, `pair`, `timeframe`, `from_date`, `to_date`, `config` entgegen
+- [ ] Historische OHLCV-Daten per ccxt von Binance laden (paginiert, bis zu 1000 Candles pro Request)
+- [ ] Bestehende Bot-Klassen (RSIBot, MACDBot, BollingerBot) gegen historische Daten laufen lassen
+- [ ] Ergebnisse: `pnl_pct`, `sharpe`, `win_rate`, `max_drawdown`, `trade_count`, `trades[]`
+- [ ] `GET /backtest/results` — Liste der gespeicherten Backtests des Users
+- [ ] Ergebnisse in neue Supabase-Tabelle `backtest_runs` speichern
+
+**Datenbank:**
+- [ ] Neue Tabelle `backtest_runs` (id, user_id, bot_type, pair, timeframe, from_date, to_date, config, result_json, created_at)
+- [ ] RLS: User sieht nur eigene Backtest-Ergebnisse
+
+**Frontend (`/dashboard/Backtest.tsx`):**
+- [ ] Formular: Bot-Typ, Pair, Timeframe, Von-Bis-Datum, Bot-Config (JSON)
+- [ ] Ergebniskarte: PnL%, Sharpe, Win Rate, Max DD, Trade Count
+- [ ] Equity Curve Chart (Recharts) für den Backtest-Verlauf
+- [ ] Ergebnisliste: Alle vergangenen Backtests des Users
+- [ ] Navigation: "Backtest" Link in Navbar
+
+---
+
+### Schritt 2 — Copy Trading Bot 🔲 Geplant
+
+**Konzept:** Ein Bot der Trades eines "Lead Traders" nachbildet.
+
+**Mögliche Quellen (noch zu entscheiden):**
+- Binance Copy Trading API (offizieller Lead-Trader per Binance-ID)
+- Manuelle Signal-Eingabe (Admin gibt Trade-Signale über API-Endpunkt ein)
+- Telegram Signal-Kanal (Webhook-basiert)
+
+**Backend:**
+- [ ] `CopyTradingBot` Klasse (erbt von `BaseBot`)
+- [ ] Signal-Quelle konfigurierbar (zunächst: manuell / Webhook)
+- [ ] Paper-Trading mit VirtualPortfolioEngine
+- [ ] Risk Management: Max Position Size, Stop-Loss konfigurierbar
+
+**Frontend:**
+- [ ] Copy Trading im `CreateBotModal` aktivieren
+- [ ] Lead-Trader-ID / Webhook-URL als Config-Feld
+- [ ] Live-Signal-Feed auf BotDetail-Seite
+
+---
+
+### Definition of Done — Phase 4 Schritt 1 (Backtesting)
+- [ ] `POST /backtest/run` liefert korrekte Metriken für RSI/MACD/Bollinger
+- [ ] Equity Curve im Backtest sieht plausibel aus (kein Gap-Start)
+- [ ] Ergebnisse werden in Supabase gespeichert und wieder abrufbar
+- [ ] Frontend zeigt Formular + Ergebnisse korrekt an
+- [ ] Typen + Lints fehlerfrei
+- [ ] Deployment auf Railway + Vercel erfolgreich
 
 ---
 

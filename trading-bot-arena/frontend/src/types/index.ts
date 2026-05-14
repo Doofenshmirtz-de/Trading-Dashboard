@@ -148,6 +148,84 @@ export interface SignalsResponse {
   total: number
 }
 
+// ── Phase 4: Backtesting types ─────────────────────────────────────────────────
+
+export interface BacktestRequest {
+  name?: string
+  pair: string
+  timeframe: string
+  from_date: string
+  to_date: string
+  initial_balance?: number
+  config: Record<string, unknown>
+}
+
+export interface BacktestEquityPoint {
+  timestamp: number
+  value: number
+}
+
+export interface BacktestTradeResult {
+  action: 'buy' | 'sell'
+  price: number
+  timestamp: number
+  pnl_usdt?: number | null
+  pnl_pct?: number | null
+  reason?: string
+}
+
+export interface BacktestMetrics {
+  total_trades: number
+  winning_trades: number
+  losing_trades: number
+  win_rate: number
+  pnl_usdt: number
+  pnl_pct: number
+  max_drawdown_pct: number
+  sharpe_ratio: number
+  final_balance: number
+}
+
+export interface BacktestResult {
+  id: string
+  name: string
+  pair: string
+  timeframe: string
+  from_date: string
+  to_date: string
+  initial_balance: number
+  config: Record<string, unknown>
+  metrics: BacktestMetrics
+  equity_curve: BacktestEquityPoint[]
+  trades: BacktestTradeResult[]
+  candle_count: number
+  created_at: string
+}
+
+export interface BacktestSummary {
+  id: string
+  name: string
+  pair: string
+  timeframe: string
+  from_date: string
+  to_date: string
+  initial_balance: number
+  config: Record<string, unknown>
+  total_trades: number | null
+  win_rate: number | null
+  pnl_pct: number | null
+  max_drawdown_pct: number | null
+  sharpe_ratio: number | null
+  candle_count: number | null
+  status: string
+  created_at: string
+}
+
+export interface BacktestResultsResponse {
+  results: BacktestSummary[]
+  total: number
+}
+
 export interface BotPerformance {
   total_trades: number
   winning_trades: number

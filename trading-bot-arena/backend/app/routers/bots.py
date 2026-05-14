@@ -43,6 +43,7 @@ def _row_to_response(row: dict) -> BotResponse:
         trading_pair=row["trading_pair"],
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        started_at=row.get("started_at"),
     )
 
 
@@ -195,6 +196,11 @@ async def update_bot(
         update_data["name"] = stripped
     if body.status is not None:
         update_data["status"] = body.status
+        # Update started_at based on status transition
+        if body.status == "running":
+            update_data["started_at"] = datetime.now(timezone.utc).isoformat()
+        elif body.status in ("stopped", "paused"):
+            update_data["started_at"] = None
     if body.config is not None:
         update_data["config"] = body.config
     if body.trading_pair is not None:
@@ -378,7 +384,7 @@ async def get_bot_performance(
     winning = [p for p in pnl_values if p > 0]
     losing = [p for p in pnl_values if p <= 0]
 
-    # Snapshots for Sharpe and drawdown
+    # Snapshots for Sharpe, drawdown, and PnL
     snaps_resp = (
         client.table("bot_snapshots")
         .select("total_value,pnl_pct,timestamp")
@@ -387,6 +393,12 @@ async def get_bot_performance(
         .execute()
     )
     snapshots = snaps_resp.data or []
+
+    # Use latest snapshot's pnl_pct as total_pnl_pct for consistency with Equity Curve
+    # This fixes the discrepancy between Performance Card and Equity Curve
+    latest_pnl_pct = 0.0
+    if snapshots:
+        latest_pnl_pct = float(snapshots[-1]["pnl_pct"])
 
     # Max drawdown from total_value series
     max_drawdown = 0.0
@@ -411,9 +423,12 @@ async def get_bot_performance(
             if std_r > 0:
                 sharpe = round((mean_r / std_r) * math.sqrt(365 * 24), 4)
 
-    # days_running: since first trade, or since last status change if no trades
+    # days_running: use started_at if available, else fall back to first trade or updated_at
     days_running = 0.0
-    if trades:
+    if bot_row.get("started_at"):
+        started_at = datetime.fromisoformat(str(bot_row["started_at"]).replace("Z", "+00:00"))
+        days_running = (datetime.now(timezone.utc) - started_at).total_seconds() / 86400
+    elif trades:
         first_trade_at = datetime.fromisoformat(trades[0]["created_at"].replace("Z", "+00:00"))
         days_running = (datetime.now(timezone.utc) - first_trade_at).total_seconds() / 86400
     elif bot_row.get("updated_at"):
@@ -431,7 +446,7 @@ async def get_bot_performance(
         "losing_trades": len(losing),
         "win_rate": round(len(winning) / len(closed_trades), 4) if closed_trades else 0.0,
         "total_pnl_usdt": round(sum(pnl_usdt_values), 4),
-        "total_pnl_pct": round(sum(pnl_values), 4),
+        "total_pnl_pct": round(latest_pnl_pct, 4),  # Use snapshot pnl_pct for consistency
         "best_trade_pct": round(max(pnl_values), 4) if pnl_values else 0.0,
         "worst_trade_pct": round(min(pnl_values), 4) if pnl_values else 0.0,
         "avg_trade_pct": round(statistics.mean(pnl_values), 4) if pnl_values else 0.0,

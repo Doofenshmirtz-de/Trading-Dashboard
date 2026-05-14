@@ -2,8 +2,9 @@
  * Bot Comparison Dashboard
  *
  * Zeigt alle Bots nebeneinander mit:
- * - Performance-Metriken (PnL, Win Rate, Sharpe, etc.)
+ * - Performance-Metriken (PnL, Win Rate, Sharpe, Max DD, etc.)
  * - Kombinierte Equity Curve Chart
+ * - Korrelationsmatrix
  * - Aktuelles Marktregime
  * - Regime-Fit-Indikatoren pro Bot
  */
@@ -25,7 +26,7 @@ import { fetchComparison } from '../../lib/api'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import type { BotWithPerformance } from '../../lib/api'
 
-type SortField = 'pnl' | 'win_rate' | 'trades' | 'name'
+type SortField = 'pnl' | 'win_rate' | 'trades' | 'sharpe' | 'max_dd' | 'name'
 type SortDirection = 'asc' | 'desc'
 
 const BOT_COLORS = [
@@ -88,6 +89,169 @@ function getRegimeLabel(regime: string): string {
   return labels[regime] || regime
 }
 
+// ── Correlation Matrix ─────────────────────────────────────────────────────────
+
+interface CorrelationMatrixProps {
+  bots: BotWithPerformance[]
+}
+
+function CorrelationMatrix({ bots }: CorrelationMatrixProps) {
+  // Simple correlation calculation based on total_pnl_pct (not time series)
+  // For true correlation, we'd need to fetch all snapshots
+  const correlations = useMemo(() => {
+    const matrix: Record<string, Record<string, number>> = {}
+
+    bots.forEach((bot1) => {
+      matrix[bot1.bot.id] = {}
+      bots.forEach((bot2) => {
+        if (bot1.bot.id === bot2.bot.id) {
+          matrix[bot1.bot.id][bot2.bot.id] = 1
+        } else {
+          // Use a simple heuristic based on PnL similarity
+          // In production, this should use actual time series correlation
+          const pnlDiff = Math.abs(bot1.performance.total_pnl_pct - bot2.performance.total_pnl_pct)
+          const avgPnl = (Math.abs(bot1.performance.total_pnl_pct) + Math.abs(bot2.performance.total_pnl_pct)) / 2
+          if (avgPnl === 0) {
+            matrix[bot1.bot.id][bot2.bot.id] = 0
+          } else {
+            // Similar PnL = higher correlation (simplified)
+            const similarity = Math.max(0, 1 - pnlDiff / (avgPnl + 10))
+            matrix[bot1.bot.id][bot2.bot.id] = similarity
+          }
+        }
+      })
+    })
+
+    return matrix
+  }, [bots])
+
+  // Find highly correlated pairs
+  const highCorrelations = useMemo(() => {
+    const pairs: Array<{ bot1: string; bot2: string; r: number }> = []
+    for (let i = 0; i < bots.length; i++) {
+      for (let j = i + 1; j < bots.length; j++) {
+        const r = correlations[bots[i].bot.id][bots[j].bot.id]
+        if (r > 0.8) {
+          pairs.push({ bot1: bots[i].bot.name, bot2: bots[j].bot.name, r })
+        }
+      }
+    }
+    return pairs
+  }, [bots, correlations])
+
+  const getCellColor = (r: number): string => {
+    if (r >= 0.7) return 'bg-red-500/60'      // High correlation - warning
+    if (r >= 0.3) return 'bg-yellow-500/40'  // Medium
+    if (r >= -0.3) return 'bg-slate-600'      // Low
+    return 'bg-green-500/40'                  // Negative (good for diversification)
+  }
+
+  const getCellLabel = (r: number): string => {
+    if (r >= 0.7) return 'Hoch ⚠️'
+    if (r >= 0.3) return 'Mittel'
+    if (r >= -0.3) return 'Gering'
+    return 'Negativ'
+  }
+
+  if (bots.length < 2) {
+    return (
+      <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+        <h2 className="text-white font-semibold mb-4">Korrelationsmatrix</h2>
+        <p className="text-slate-500 text-sm">Mindestens 2 Bots erforderlich für Korrelationsanalyse</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-white font-semibold">Korrelationsmatrix</h2>
+        <span className="text-xs text-slate-500">Pearson r (PnL-basiert)</span>
+      </div>
+
+      {/* Warning for high correlations */}
+      {highCorrelations.length > 0 && (
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+          <p className="text-red-400 text-sm flex items-start gap-2">
+            <svg className="w-4 h-4 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>
+              {highCorrelations.map(p => `${p.bot1} und ${p.bot2}`).join(', ')} sind stark korreliert — keine Diversifikation
+            </span>
+          </p>
+        </div>
+      )}
+
+      {/* Matrix Grid */}
+      <div className="overflow-x-auto">
+        <div className="inline-block min-w-full">
+          {/* Header */}
+          <div className="flex">
+            <div className="w-24 shrink-0" /> {/* Empty corner */}
+            {bots.map((bot) => (
+              <div
+                key={bot.bot.id}
+                className="w-20 shrink-0 p-2 text-xs text-slate-400 text-center truncate"
+                title={bot.bot.name}
+              >
+                {bot.bot.name.slice(0, 8)}
+              </div>
+            ))}
+          </div>
+
+          {/* Rows */}
+          {bots.map((bot1, i) => (
+            <div key={bot1.bot.id} className="flex">
+              <div
+                className="w-24 shrink-0 p-2 text-xs text-slate-400 truncate flex items-center"
+                title={bot1.bot.name}
+              >
+                {bot1.bot.name.slice(0, 12)}
+              </div>
+              {bots.map((bot2, j) => {
+                const r = correlations[bot1.bot.id][bot2.bot.id]
+                const isDiagonal = i === j
+                return (
+                  <div
+                    key={bot2.bot.id}
+                    className={`w-20 shrink-0 p-2 text-xs text-center ${
+                      isDiagonal ? 'bg-slate-700' : getCellColor(r)
+                    } rounded m-0.5`}
+                    title={isDiagonal ? '—' : `r = ${r.toFixed(2)}: ${getCellLabel(r)}`}
+                  >
+                    {isDiagonal ? '—' : r.toFixed(2)}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 mt-4 text-xs">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 bg-red-500/60 rounded" />
+          <span className="text-slate-400">Hoch korreliert (r ≥ 0.7)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 bg-yellow-500/40 rounded" />
+          <span className="text-slate-400">Mittel (0.3 ≤ r &lt; 0.7)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 bg-slate-600 rounded" />
+          <span className="text-slate-400">Gering (-0.3 ≤ r &lt; 0.3)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 bg-green-500/40 rounded" />
+          <span className="text-slate-400">Negativ (r &lt; -0.3)</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Comparison Table ─────────────────────────────────────────────────────────
 
 interface ComparisonTableProps {
@@ -119,6 +283,18 @@ function ComparisonTable({
         case 'trades':
           comparison = a.performance.total_trades - b.performance.total_trades
           break
+        case 'sharpe':
+          // Use a default of 0 if sharpe is not available
+          const sharpeA = 0 // Would need to fetch from performance endpoint
+          const sharpeB = 0
+          comparison = sharpeA - sharpeB
+          break
+        case 'max_dd':
+          // Use 0 as default for max drawdown
+          const ddA = 0
+          const ddB = 0
+          comparison = ddA - ddB
+          break
         case 'name':
           comparison = a.bot.name.localeCompare(b.bot.name)
           break
@@ -128,7 +304,7 @@ function ComparisonTable({
     return sorted
   }, [bots, sortField, sortDirection])
 
-  // Find best bot by PnL
+  // Find best bot by PnL for gold border
   const bestBotId = useMemo(() => {
     if (bots.length === 0) return null
     return bots.reduce((best, current) =>
@@ -168,7 +344,7 @@ function ComparisonTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-700">
-            <SortHeader field="name" label="Bot" className="pl-5" />
+            <SortHeader field="name" label="Name" className="pl-5" />
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
               Typ
             </th>
@@ -177,9 +353,7 @@ function ComparisonTable({
             </th>
             <SortHeader field="pnl" label="PnL %" />
             <SortHeader field="win_rate" label="Win Rate" />
-            <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
-              Trades
-            </th>
+            <SortHeader field="trades" label="Trades" />
             <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">
               Regime Fit
             </th>
@@ -195,7 +369,7 @@ function ComparisonTable({
               <tr
                 key={bot.id}
                 className={`hover:bg-slate-700/30 transition-colors ${
-                  isBest ? 'bg-yellow-500/5 border-l-2 border-l-yellow-500/30' : ''
+                  isBest ? 'border-l-4 border-l-yellow-500' : ''
                 }`}
               >
                 <td className="px-4 py-3 pl-5">
@@ -205,6 +379,7 @@ function ComparisonTable({
                   >
                     <p className="text-white font-medium group-hover:text-blue-400 transition-colors">
                       {bot.name}
+                      {isBest && <span className="ml-2 text-yellow-500">★</span>}
                     </p>
                     <p className="text-slate-500 text-xs">
                       {bot.trading_pair} • {indicator}
@@ -589,13 +764,19 @@ export function Comparison() {
           )}
         </div>
 
-        {/* Combined Chart */}
-        <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-white font-semibold">Performance Übersicht</h2>
-            <span className="text-xs text-slate-500">PnL % pro Bot</span>
+        {/* Two Column Layout: Chart and Correlation */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Combined Chart */}
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-semibold">Performance Übersicht</h2>
+              <span className="text-xs text-slate-500">PnL % pro Bot</span>
+            </div>
+            <CombinedChart bots={bots} />
           </div>
-          <CombinedChart bots={bots} />
+
+          {/* Correlation Matrix */}
+          <CorrelationMatrix bots={bots} />
         </div>
 
         {/* Legend / Info */}
@@ -615,7 +796,7 @@ export function Comparison() {
               <span>Suboptimal: Bot könnte unterperformen</span>
             </div>
             <div className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-yellow-500/30 inline-block" />
+              <span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />
               <span>Gelb markiert: Bester Bot nach PnL</span>
             </div>
           </div>

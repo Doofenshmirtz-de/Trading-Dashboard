@@ -21,7 +21,11 @@ Position sizing:
 
 from __future__ import annotations
 
+import logging
+
 from app.core.bot_base import Candle, Signal
+
+logger = logging.getLogger("trading_bot_arena")
 
 SLIPPAGE = 0.0005
 MIN_BALANCE_USDT = 10.0
@@ -47,7 +51,26 @@ class VirtualPortfolioEngine:
         """
         Execute a signal. Returns a trade dict on execution, else None.
         The returned dict is ready for direct Supabase insert into bot_trades.
+
+        Includes balance sanity check to catch data corruption.
         """
+        # Balance sanity check - catch corrupted state
+        if self.balance < 0:
+            logger.error(
+                "Balance went negative - possible data corruption",
+                extra={"bot_id": self.bot_id, "balance": self.balance}
+            )
+            self.balance = 0
+            return None
+
+        # Max balance sanity check (catch extreme corruption like $11M)
+        if self.balance > 1_000_000:
+            logger.error(
+                "Balance unreasonably high - possible data corruption",
+                extra={"bot_id": self.bot_id, "balance": self.balance}
+            )
+            return None
+
         if signal.action == "hold":
             return None
 

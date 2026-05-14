@@ -125,7 +125,7 @@ function IndicatorColumnCell({ signal, botType }: IndicatorColumnCellProps) {
   }
 }
 
-function fmtDurationSince(iso?: string) {
+function fmtDurationSince(iso?: string | null) {
   if (!iso) return '—'
   const startedAt = new Date(iso).getTime()
   if (Number.isNaN(startedAt)) return '—'
@@ -356,8 +356,8 @@ export function BotDetail() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
-              <p className="text-xs text-slate-400 mb-1">Time online (seit updated_at)</p>
-              <p className="text-sm text-white font-medium">{fmtDurationSince(bot?.updated_at)}</p>
+              <p className="text-xs text-slate-400 mb-1">Time online</p>
+              <p className="text-sm text-white font-medium">{fmtDurationSince(bot?.started_at)}</p>
             </div>
             <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-3">
               <p className="text-xs text-slate-400 mb-1">Signals (geladen)</p>

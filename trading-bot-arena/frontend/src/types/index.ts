@@ -13,6 +13,7 @@ export interface Bot {
   trading_pair: string
   created_at: string
   updated_at: string
+  started_at: string | null
 }
 
 export interface CreateBotRequest {

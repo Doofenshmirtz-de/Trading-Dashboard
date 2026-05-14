@@ -154,3 +154,76 @@ def test_reconstruct_closed_position():
     ]
     eng.reconstruct_from_trades(trades)
     assert eng.position is None
+
+
+# ── Balance Sanity Checks ─────────────────────────────────────────────────────
+
+def test_negative_balance_sanity_check():
+    """Negative balance should be caught and reset to 0."""
+    eng = _engine(balance=1000.0)
+    eng.balance = -100  # Simulate corrupted state
+    trade = eng.execute(_signal("buy"), _candle(50000.0), "user1")
+    assert trade is None
+    assert eng.balance == 0  # Should be reset
+
+
+def test_extreme_high_balance_sanity_check():
+    """Balance > $1M should be caught as corruption."""
+    eng = _engine(balance=11_000_000.0)  # $11M - like Bot 3 bug
+    trade = eng.execute(_signal("buy"), _candle(50000.0), "user1")
+    assert trade is None  # Should refuse to trade
+
+
+def test_balance_consistency_buy_then_sell():
+    """Balance after buy+sell should be consistent (minus fees/slippage)."""
+    eng = _engine(balance=1000.0, position_size_pct=100.0)
+
+    # Buy
+    buy_trade = eng.execute(_signal("buy"), _candle(50000.0), "user1")
+    assert buy_trade is not None
+    balance_after_buy = eng.balance
+
+    # Sell at same price
+    sell_trade = eng.execute(_signal("sell"), _candle(50000.0), "user1")
+    assert sell_trade is not None
+    balance_after_sell = eng.balance
+
+    # Should have less than initial due to fees (2 trades) and slippage
+    assert balance_after_sell < 1000.0
+    # Should not be negative
+    assert balance_after_sell >= 0
+
+
+def test_reconstruct_balance_accuracy():
+    """Reconstructed balance should match actual trading."""
+    # First, simulate actual trading
+    eng1 = _engine(balance=1000.0, position_size_pct=100.0)
+    eng1.execute(_signal("buy"), _candle(50000.0), "user1")
+    eng1.execute(_signal("sell"), _candle(55000.0), "user1")
+    actual_final_balance = eng1.balance
+
+    # Now reconstruct from trades
+    eng2 = _engine(balance=1000.0)
+    trades = [
+        {
+            "action": "buy",
+            "price": eng1.position["entry_price"] if eng1.position else 50025.0,
+            "quantity": 0.019,
+            "value_usdt": 950.0,
+            "fee_usdt": 0.38,
+            "candle_timestamp": 1_000_000,
+        },
+        {
+            "action": "sell",
+            "price": 54972.5,  # 55000 * (1 - SLIPPAGE)
+            "quantity": 0.019,
+            "value_usdt": 1044.5,
+            "fee_usdt": 0.42,
+            "candle_timestamp": 2_000_000,
+        },
+    ]
+    eng2.reconstruct_from_trades(trades)
+
+    # Reconstructed balance should be approximately correct
+    # (small diff due to rounding in trade values)
+    assert abs(eng2.balance - actual_final_balance) < 10

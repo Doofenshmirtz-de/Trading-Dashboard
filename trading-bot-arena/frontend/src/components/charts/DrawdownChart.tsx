@@ -83,17 +83,27 @@ function calculateDrawdown(snapshots: Snapshot[]): Array<{
   return result
 }
 
+// Calculate X-axis interval based on data length to prevent overlapping labels
+function calculateXAxisInterval(dataLength: number): number {
+  if (dataLength > 200) return Math.floor(dataLength / 8)
+  if (dataLength > 50) return Math.floor(dataLength / 6)
+  return 0
+}
+
 export function DrawdownChart({ snapshots }: DrawdownChartProps) {
   // Calculate drawdown data
   const chartData = useMemo(() => calculateDrawdown(snapshots), [snapshots])
 
-  // Calculate Y domain (always negative or zero)
+  // Calculate Y domain with 20% padding below minimum to prevent cutoff
   const yDomain = useMemo(() => {
     if (chartData.length === 0) return [-0.5, 0] as const
     const minDrawdown = Math.min(...chartData.map((d) => d.drawdown))
-    // Add 0.5% padding below minimum
-    return [minDrawdown - 0.5, 0] as const
+    // Add 20% padding below minimum to prevent cutoff
+    return [Math.floor(minDrawdown * 1.2), 0] as const
   }, [chartData])
+
+  // Calculate X-axis interval
+  const xAxisInterval = useMemo(() => calculateXAxisInterval(chartData.length), [chartData.length])
 
   // Find maximum drawdown for display
   const maxDrawdown = useMemo(() => {
@@ -162,8 +172,8 @@ export function DrawdownChart({ snapshots }: DrawdownChartProps) {
             tick={{ fill: '#94a3b8', fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            interval="preserveStartEnd"
-            minTickGap={50}
+            interval={xAxisInterval}
+            minTickGap={60}
           />
 
           <YAxis

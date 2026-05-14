@@ -67,5 +67,6 @@ class BotResponse(BotBase):
     status: str
     created_at: str
     updated_at: str
+    started_at: str | None = None
 
     model_config = {"from_attributes": True}

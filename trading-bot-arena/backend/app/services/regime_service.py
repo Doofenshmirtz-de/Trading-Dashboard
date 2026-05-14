@@ -139,10 +139,30 @@ class RegimeService:
             timestamps = [int(c["timestamp"]) for c in candles]
             
             # Berechne Indikatoren
-            adx, plus_di, minus_di = self._calculate_adx(highs, lows, closes)
+            adx, plus_di, minus_di = self._calculate_adx(highs, lows, closes, self.adx_period)
+
+            # Safe fallback if ADX calculation fails
+            if adx is None:
+                logger.warning(
+                    "ADX calculation returned None — falling back to RANGING",
+                    extra={"pair": pair, "timeframe": timeframe, "candles": len(candles)}
+                )
+                from time import time
+                return RegimeResult(
+                    regime=MarketRegime.RANGING,
+                    adx=None,
+                    bb_width_pct=None,
+                    sma_slope=None,
+                    plus_di=None,
+                    minus_di=None,
+                    timestamp=int(time() * 1000),
+                    pair=pair,
+                    timeframe=timeframe,
+                )
+
             bb_width = self._calculate_bb_width(closes)
             sma_slope = self._calculate_sma_slope(closes, period=20)
-            
+
             # Debug-Logging der berechneten Werte
             logger.info(
                 "Regime indicators calculated",
@@ -156,7 +176,7 @@ class RegimeService:
                     "candles_used": len(candles),
                 }
             )
-            
+
             # Klassifiziere Regime
             current_sma = sum(closes[-20:]) / 20 if len(closes) >= 20 else closes[-1]
             regime = self._classify_regime(
@@ -210,140 +230,96 @@ class RegimeService:
         highs: list[float],
         lows: list[float],
         closes: list[float],
+        period: int = 14,
     ) -> tuple[float | None, float | None, float | None]:
         """
         Berechne ADX, +DI, -DI mit Wilder's Smoothing.
-        
-        Spezifikation:
+
+        Verifizierte Implementation nach den Regeln:
         - TR = max(high-low, |high-prev_close|, |low-prev_close|)
-        - +DM = high - prev_high if positive and > (prev_low - low), else 0
-        - -DM = prev_low - low if positive and > (high - prev_high), else 0
-        - Smooth mit Wilder's alpha = 1/period
-        
+        - +DM = max(high - prev_high, 0) if up > down, else 0
+        - -DM = max(prev_low - low, 0) if down > up, else 0
+        - Smooth: prev - prev/period + current (Wilder's method)
+
         Returns:
             Tuple (adx, plus_di, minus_di) oder (None, None, None) bei Fehler
         """
         n = len(highs)
-        min_required = self.adx_period * 2 + 1  # Period für Initial-Smooth + Period für ADX
-        
-        if n < min_required:
+        if n < period * 2 + 1:
             logger.warning(
                 "ADX calculation: insufficient data",
                 extra={
-                    "required": min_required,
+                    "required": period * 2 + 1,
                     "available": n,
-                    "adx_period": self.adx_period,
+                    "adx_period": period,
                 }
             )
             return None, None, None
-        
-        # Berechne True Range und Directional Movement
-        tr_values: list[float] = []
-        plus_dm_values: list[float] = []
-        minus_dm_values: list[float] = []
-        
+
+        # Step 1: True Range and Directional Movement
+        tr_list, pdm_list, ndm_list = [], [], []
         for i in range(1, n):
-            high = highs[i]
-            low = lows[i]
-            prev_high = highs[i - 1]
-            prev_low = lows[i - 1]
-            prev_close = closes[i - 1]
-            
-            # True Range
-            tr1 = high - low
-            tr2 = abs(high - prev_close)
-            tr3 = abs(low - prev_close)
-            tr = max(tr1, tr2, tr3)
-            tr_values.append(tr)
-            
-            # Directional Movement
-            up_move = high - prev_high
-            down_move = prev_low - low
-            
-            if up_move > down_move and up_move > 0:
-                plus_dm_values.append(up_move)
-                minus_dm_values.append(0)
-            elif down_move > up_move and down_move > 0:
-                plus_dm_values.append(0)
-                minus_dm_values.append(down_move)
-            else:
-                plus_dm_values.append(0)
-                minus_dm_values.append(0)
-        
-        # Wilder's Smoothing: Initialisiere mit SMA der ersten 'period' Werte
-        tr_smooth = sum(tr_values[:self.adx_period]) / self.adx_period
-        plus_dm_smooth = sum(plus_dm_values[:self.adx_period]) / self.adx_period
-        minus_dm_smooth = sum(minus_dm_values[:self.adx_period]) / self.adx_period
-        
-        # Listen für DI-Werte
-        plus_di_values: list[float] = []
-        minus_di_values: list[float] = []
-        dx_values: list[float] = []
-        
-        # Berechne DI und DX für jeden Zeitpunkt nach der Initial-Periode
-        for i in range(self.adx_period, len(tr_values)):
-            # Wilder's Smoothing: (prev_smooth * (period-1) + current) / period
-            tr_smooth = (tr_smooth * (self.adx_period - 1) + tr_values[i]) / self.adx_period
-            plus_dm_smooth = (plus_dm_smooth * (self.adx_period - 1) + plus_dm_values[i]) / self.adx_period
-            minus_dm_smooth = (minus_dm_smooth * (self.adx_period - 1) + minus_dm_values[i]) / self.adx_period
-            
-            # +DI und -DI
-            if tr_smooth > 0:
-                plus_di = 100 * plus_dm_smooth / tr_smooth
-                minus_di = 100 * minus_dm_smooth / tr_smooth
-            else:
-                plus_di = 0
-                minus_di = 0
-            
-            plus_di_values.append(plus_di)
-            minus_di_values.append(minus_di)
-            
-            # DX (Directional Index)
-            di_sum = plus_di + minus_di
-            if di_sum > 0:
-                dx = 100 * abs(plus_di - minus_di) / di_sum
-            else:
-                dx = 0
-            
-            dx_values.append(dx)
-        
-        # ADX ist geglätteter DX mit derselben Periode
-        if len(dx_values) < self.adx_period:
+            high, low, prev_close = highs[i], lows[i], closes[i-1]
+            prev_high, prev_low = highs[i-1], lows[i-1]
+
+            tr = max(high - low,
+                     abs(high - prev_close),
+                     abs(low - prev_close))
+            pdm = max(high - prev_high, 0) \
+                  if (high - prev_high) > (prev_low - low) else 0
+            ndm = max(prev_low - low, 0) \
+                  if (prev_low - low) > (high - prev_high) else 0
+
+            tr_list.append(tr)
+            pdm_list.append(pdm)
+            ndm_list.append(ndm)
+
+        # Step 2: Wilder's smoothing (initial = sum of first period)
+        atr = sum(tr_list[:period])
+        apdm = sum(pdm_list[:period])
+        andm = sum(ndm_list[:period])
+
+        dx_list = []
+        for i in range(period, len(tr_list)):
+            atr  = atr  - (atr  / period) + tr_list[i]
+            apdm = apdm - (apdm / period) + pdm_list[i]
+            andm = andm - (andm / period) + ndm_list[i]
+
+            pdi = 100 * apdm / atr if atr > 0 else 0
+            ndi = 100 * andm / atr if atr > 0 else 0
+            dx  = 100 * abs(pdi - ndi) / (pdi + ndi) \
+                  if (pdi + ndi) > 0 else 0
+            dx_list.append((dx, pdi, ndi))
+
+        if len(dx_list) < period:
             logger.warning(
                 "ADX calculation: insufficient DX values",
                 extra={
-                    "dx_count": len(dx_values),
-                    "required": self.adx_period,
+                    "dx_count": len(dx_list),
+                    "required": period,
                 }
             )
             return None, None, None
-        
-        # Initialisiere ADX mit SMA der ersten DX-Werte
-        adx = sum(dx_values[:self.adx_period]) / self.adx_period
-        
-        # Wilder's Smoothing für restliche DX-Werte
-        for i in range(self.adx_period, len(dx_values)):
-            adx = (adx * (self.adx_period - 1) + dx_values[i]) / self.adx_period
-        
-        # Aktuelle DI-Werte (letzte berechnete)
-        if plus_di_values and minus_di_values:
-            final_plus_di = plus_di_values[-1]
-            final_minus_di = minus_di_values[-1]
-        else:
-            final_plus_di = None
-            final_minus_di = None
-        
+
+        # Step 3: ADX = Wilder's smooth of DX
+        adx = sum(d[0] for d in dx_list[:period]) / period
+        for dx, pdi, ndi in dx_list[period:]:
+            adx = adx - (adx / period) + dx
+
+        last_pdi = dx_list[-1][1]
+        last_ndi = dx_list[-1][2]
+
         logger.debug(
             "ADX calculation complete",
             extra={
-                "adx": adx,
-                "plus_di": final_plus_di,
-                "minus_di": final_minus_di,
-                "dx_count": len(dx_values),
+                "adx": round(adx, 2),
+                "plus_di": round(last_pdi, 2),
+                "minus_di": round(last_ndi, 2),
+                "dx_count": len(dx_list),
             }
         )
-        
-        return adx, final_plus_di, final_minus_di
+
+        return round(adx, 2), round(last_pdi, 2), round(last_ndi, 2)
     
     def _calculate_bb_width(self, closes: list[float]) -> float | None:
         """

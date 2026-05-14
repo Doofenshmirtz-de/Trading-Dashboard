@@ -1,7 +1,7 @@
 // Equity Curve Chart Component
-// Displays PnL % over time with gradient fill and custom tooltip
+// Displays PnL % over time with gradient fill, timeframe selector, and stale data warning
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   AreaChart,
@@ -20,6 +20,19 @@ interface EquityCurveProps {
   botId: string
   initialBalance: number
   onSnapshotsLoaded?: (snapshots: Snapshot[]) => void
+}
+
+type TimeframeOption = {
+  label: string
+  limit: number
+  resolution: string
+}
+
+const TIMEFRAME_OPTIONS: Record<string, TimeframeOption> = {
+  '1D': { label: '1D', limit: 1440, resolution: '1m' },
+  '1W': { label: '1W', limit: 168, resolution: '1h' },
+  '1M': { label: '1M', limit: 720, resolution: '1h' },
+  'ALL': { label: 'ALL', limit: 5000, resolution: '4h' },
 }
 
 // Format date as "DD.MM HH:mm" using native Date methods only
@@ -51,10 +64,20 @@ function formatCurrency(n: number): string {
   })
 }
 
+// Calculate X-axis interval based on data length to prevent overlapping labels
+function calculateXAxisInterval(dataLength: number): number {
+  if (dataLength > 200) return Math.floor(dataLength / 8)
+  if (dataLength > 50) return Math.floor(dataLength / 6)
+  return 0
+}
+
 export function EquityCurve({ botId, initialBalance, onSnapshotsLoaded }: EquityCurveProps) {
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1W')
+  const timeframeConfig = TIMEFRAME_OPTIONS[selectedTimeframe]
+
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['bot-snapshots', botId, 'equity-curve'],
-    queryFn: () => fetchBotSnapshots(botId, 720, '1h'),
+    queryKey: ['bot-snapshots', botId, 'equity-curve', selectedTimeframe],
+    queryFn: () => fetchBotSnapshots(botId, timeframeConfig.limit, timeframeConfig.resolution),
     refetchInterval: 60_000,
     enabled: !!botId,
   })
@@ -80,10 +103,58 @@ export function EquityCurve({ botId, initialBalance, onSnapshotsLoaded }: Equity
   }, [snapshots])
 
   // Determine color based on last PnL
+  const lastSnapshot = snapshots[snapshots.length - 1]
   const lastPnL = chartData.length > 0 ? chartData[chartData.length - 1].pnlPct : 0
   const isPositive = lastPnL >= 0
   const strokeColor = isPositive ? '#22c55e' : '#ef4444'
   const gradientId = isPositive ? 'pnlGradientGreen' : 'pnlGradientRed'
+
+  // Check for stale data (no update in > 2 hours)
+  const hoursSinceUpdate = useMemo(() => {
+    if (!lastSnapshot) return 0
+    const lastTimestamp = new Date(lastSnapshot.timestamp).getTime()
+    return (Date.now() - lastTimestamp) / 3600000
+  }, [lastSnapshot])
+
+  const isStale = hoursSinceUpdate > 2
+
+  // Calculate X-axis interval
+  const xAxisInterval = useMemo(() => calculateXAxisInterval(chartData.length), [chartData.length])
+
+  // Timeframe selector buttons
+  const TimeframeButtons = () => (
+    <div className="flex gap-1">
+      {Object.keys(TIMEFRAME_OPTIONS).map((tf) => (
+        <button
+          key={tf}
+          onClick={() => setSelectedTimeframe(tf)}
+          className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+            selectedTimeframe === tf
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+          }`}
+        >
+          {TIMEFRAME_OPTIONS[tf].label}
+        </button>
+      ))}
+    </div>
+  )
+
+  // Stale data warning banner
+  const StaleWarning = () => {
+    if (!isStale) return null
+    const hours = Math.floor(hoursSinceUpdate)
+    return (
+      <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+        <p className="text-amber-400 text-sm flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          Keine neuen Daten seit {hours} {hours === 1 ? 'Stunde' : 'Stunden'} — Bot-Ticker prüfen
+        </p>
+      </div>
+    )
+  }
 
   // Loading state
   if (isLoading) {
@@ -157,6 +228,15 @@ export function EquityCurve({ botId, initialBalance, onSnapshotsLoaded }: Equity
 
   return (
     <div className="w-full">
+      <StaleWarning />
+
+      <div className="flex items-center justify-between mb-4">
+        <TimeframeButtons />
+        <span className="text-xs text-slate-500">
+          {snapshots.length} Datenpunkte
+        </span>
+      </div>
+
       <ResponsiveContainer width="100%" height={320}>
         <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           <defs>
@@ -173,8 +253,8 @@ export function EquityCurve({ botId, initialBalance, onSnapshotsLoaded }: Equity
             tick={{ fill: '#94a3b8', fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            interval="preserveStartEnd"
-            minTickGap={50}
+            interval={xAxisInterval}
+            minTickGap={60}
           />
 
           <YAxis

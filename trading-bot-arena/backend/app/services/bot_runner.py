@@ -103,6 +103,7 @@ class BotRunner:
 
     def __init__(self) -> None:
         self.running: dict[str, dict] = {}
+        self.last_tick: str | None = None  # ISO timestamp of last tick
 
     # ── Bot lifecycle ──────────────────────────────────────────────────────────
 
@@ -181,6 +182,13 @@ class BotRunner:
             "timeframe": timeframe,
             "initial_balance": initial_balance,
         }
+
+        # Update started_at in Supabase when bot starts
+        try:
+            client.table("bots").update({"started_at": datetime.now(timezone.utc).isoformat()}).eq("id", bot_id).execute()
+        except Exception as e:
+            logger.warning("Failed to update started_at", extra={"bot_id": bot_id, "error": str(e)})
+
         logger.info("Bot started", extra={"bot_id": bot_id, "bot_name": bot_name, "type": bot_type})
 
     async def stop_bot(self, bot_id: str) -> None:
@@ -212,25 +220,38 @@ class BotRunner:
         Process one tick for all bots configured with the given timeframe.
         Called by APScheduler on the matching interval.
         """
-        bots_for_tf = {
-            bid: entry
-            for bid, entry in self.running.items()
-            if entry["timeframe"] == tf
-        }
+        try:
+            # Update last_tick timestamp at start
+            self.last_tick = datetime.now(timezone.utc).isoformat()
 
-        if not bots_for_tf:
-            return
+            bots_for_tf = {
+                bid: entry
+                for bid, entry in self.running.items()
+                if entry["timeframe"] == tf
+            }
 
-        logger.info("Tick started", extra={"timeframe": tf, "bot_count": len(bots_for_tf)})
+            if not bots_for_tf:
+                return
 
-        for bot_id, entry in bots_for_tf.items():
-            try:
-                await self._tick_bot(bot_id, entry)
-            except Exception as e:
-                logger.error(
-                    "Bot tick error",
-                    extra={"bot_id": bot_id, "bot_name": entry.get("bot_name"), "error": str(e)},
-                )
+            logger.info("Tick started", extra={"timeframe": tf, "running_bots": len(bots_for_tf)})
+
+            for bot_id, entry in list(bots_for_tf.items()):
+                try:
+                    await self._tick_bot(bot_id, entry)
+                except Exception as e:
+                    logger.error(
+                        "Bot tick failed",
+                        extra={"bot_id": bot_id, "bot_name": entry.get("bot_name"), "error": str(e)},
+                    )
+                    continue  # Don't let one bad bot kill the tick loop
+
+            logger.info("Tick completed", extra={"timeframe": tf, "bots_processed": len(bots_for_tf)})
+
+        except Exception as e:
+            logger.error(
+                "Tick timeframe failed",
+                extra={"timeframe": tf, "error": str(e)},
+            )
 
     async def _tick_bot(self, bot_id: str, entry: dict) -> None:
         bot = entry["bot"]
@@ -297,8 +318,8 @@ class BotRunner:
 
         # Logging mit Indikator-Info
         action = signal.action if signal else "none"
-        indicator_name = config.get("indicator", "RSI")
-        
+        indicator_name = entry["config"].get("indicator", "RSI")
+
         if rsi_value is not None:
             indicator_text = f"RSI={rsi_value:.1f}"
         elif macd_value is not None:
@@ -307,7 +328,7 @@ class BotRunner:
             indicator_text = f"BB: {bb_lower:.0f} - {bb_upper:.0f}"
         else:
             indicator_text = "n/a"
-            
+
         logger.info(
             f"Tick [{timeframe}]: {bot_name} | {indicator_text} | "
             f"Signal={action} | Balance={engine.balance:.2f}"

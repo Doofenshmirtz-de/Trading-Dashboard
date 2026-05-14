@@ -603,7 +603,215 @@ function EndpointTester() {
   )
 }
 
-// ─── 6. Bots Diagnose ────────────────────────────────────────────────────────
+// ─── 6. Binance Leaderboard Tester ───────────────────────────────────────────
+function BinanceLeaderboardSection() {
+  const [sortBy, setSortBy] = useState<'ROI' | 'PNL'>('ROI')
+  const [period, setPeriod] = useState<'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ALL'>('MONTHLY')
+  const [limit, setLimit] = useState(5)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{
+    status: number | null
+    latency: number
+    body: string
+    error?: string
+    leaders?: Array<Record<string, unknown>>
+  } | null>(null)
+
+  async function runTest() {
+    setLoading(true)
+    setResult(null)
+    const t0 = performance.now()
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      const url = `${API_URL}/market/copy-trading/leaders?sort_by=${sortBy}&period=${period}&limit=${limit}`
+      const res = await fetch(url, {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      })
+      const latency = Math.round(performance.now() - t0)
+      let parsed: unknown
+      let text = ''
+      try {
+        parsed = await res.json()
+        text = JSON.stringify(parsed, null, 2)
+      } catch {
+        text = await res.text()
+      }
+      const leaders = (parsed as { leaders?: Array<Record<string, unknown>> })?.leaders ?? []
+      setResult({ status: res.status, latency, body: text, leaders })
+    } catch (e) {
+      const latency = Math.round(performance.now() - t0)
+      setResult({ status: null, latency, body: '', error: e instanceof Error ? e.message : String(e) })
+    }
+    setLoading(false)
+  }
+
+  const leadersFound = result?.leaders?.length ?? 0
+
+  return (
+    <Section title="Binance Copy Trading Leaderboard Test" defaultOpen={true}>
+      <p className="text-xs text-slate-400 mt-2 mb-4">
+        Direkt-Test für <code className="text-yellow-400 text-[11px]">GET /market/copy-trading/leaders</code> — zeigt rohen Response und ob Binance-Daten ankommen.
+      </p>
+
+      {/* Controls */}
+      <div className="flex gap-3 flex-wrap mb-4">
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Sort By</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'ROI' | 'PNL')}
+            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white"
+          >
+            <option value="ROI">ROI</option>
+            <option value="PNL">PNL</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Period</label>
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value as 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'ALL')}
+            className="bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white"
+          >
+            <option value="DAILY">DAILY</option>
+            <option value="WEEKLY">WEEKLY</option>
+            <option value="MONTHLY">MONTHLY</option>
+            <option value="ALL">ALL</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Limit</label>
+          <input
+            type="number"
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            min={1}
+            max={50}
+            className="w-20 bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-white"
+          />
+        </div>
+        <div className="flex items-end">
+          <button
+            onClick={runTest}
+            disabled={loading || !API_URL}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 rounded-lg transition-colors"
+          >
+            {loading ? 'Lädt…' : '▶ Test starten'}
+          </button>
+        </div>
+      </div>
+
+      {/* Result */}
+      {result && (
+        <div className="space-y-3">
+          {/* Status bar */}
+          <div className="flex items-center gap-3 text-xs">
+            <span className={statusColor(result.status)}>
+              HTTP {result.status ?? 'ERR'}
+            </span>
+            <span className="text-slate-500">{result.latency}ms</span>
+            {result.status === 200 && leadersFound > 0 && (
+              <span className="text-green-400 font-medium">✅ {leadersFound} Trader geladen</span>
+            )}
+            {result.status === 200 && leadersFound === 0 && (
+              <span className="text-yellow-400 font-medium">⚠️ 200 OK aber 0 Trader — Binance API gibt leere Liste zurück</span>
+            )}
+            {result.status !== 200 && result.status !== null && (
+              <span className="text-red-400 font-medium">❌ Backend-Fehler — sieh Response unten</span>
+            )}
+            {result.error && (
+              <span className="text-red-400 font-medium">❌ Netzwerkfehler</span>
+            )}
+          </div>
+
+          {/* Leaders quick-view */}
+          {leadersFound > 0 && (
+            <div className="bg-slate-900 rounded-lg overflow-hidden">
+              <p className="text-[11px] text-slate-500 px-3 py-2 border-b border-slate-800">Traders (Vorschau)</p>
+              <div className="divide-y divide-slate-800">
+                {result.leaders!.map((l, i) => (
+                  <div key={i} className="px-3 py-2 text-xs font-mono flex items-center gap-3 flex-wrap">
+                    <span className="text-slate-500 w-4 shrink-0">{i + 1}.</span>
+                    <span className="text-white">{String(l.nickname ?? l.encryptedUid ?? '—').slice(0, 24)}</span>
+                    <span className="text-green-400">ROI: {typeof l.roi === 'number' ? `${(l.roi * 100).toFixed(2)}%` : String(l.roi ?? '—')}</span>
+                    <span className="text-blue-300">PnL: {String(l.pnl ?? '—')}</span>
+                    <span className="text-slate-500 text-[10px]">uid: {String(l.encryptedUid ?? '—').slice(0, 16)}…</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Raw response */}
+          <details>
+            <summary className="text-[11px] text-slate-500 cursor-pointer hover:text-slate-300 select-none">
+              Raw Response anzeigen
+            </summary>
+            {result.error ? (
+              <p className="mt-2 text-red-400 text-xs font-mono bg-slate-950 rounded p-3">{result.error}</p>
+            ) : (
+              <pre
+                className="mt-2 bg-slate-950 rounded px-4 py-3 text-[11px] font-mono overflow-auto max-h-72 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: highlightJson(result.body) }}
+              />
+            )}
+          </details>
+        </div>
+      )}
+
+      {!result && !loading && (
+        <p className="text-slate-600 text-xs">Noch kein Test gestartet.</p>
+      )}
+    </Section>
+  )
+}
+
+// ─── 7. System Info ───────────────────────────────────────────────────────────
+function SystemInfoSection() {
+  const [copied, setCopied] = useState(false)
+
+  const info = {
+    'Browser': navigator.userAgent.replace(/\s+\S+\/\d[\d.]*\s*/g, ' ').trim().slice(0, 80),
+    'Frontend Origin': window.location.origin,
+    'Protokoll': window.location.protocol,
+    'Backend URL': API_URL || '(nicht konfiguriert)',
+    'Supabase URL': (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.replace(/^https?:\/\//, '').slice(0, 40) ?? '(nicht gesetzt)',
+    'Build Mode': import.meta.env.MODE as string,
+    'Uhrzeit (lokal)': new Date().toLocaleString('de-DE'),
+    'Uhrzeit (UTC)': new Date().toUTCString(),
+  }
+
+  async function copyAll() {
+    const text = Object.entries(info).map(([k, v]) => `${k}: ${v}`).join('\n')
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <Section title="System Info" defaultOpen={false}>
+      <table className="w-full text-xs mt-2">
+        <tbody className="divide-y divide-slate-700/50">
+          {Object.entries(info).map(([k, v]) => (
+            <tr key={k}>
+              <td className="py-2 pr-4 text-slate-500 w-40 shrink-0 align-top">{k}</td>
+              <td className="py-2 text-slate-300 font-mono break-all">{v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        onClick={copyAll}
+        className="mt-3 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+      >
+        {copied ? '✅ Kopiert' : 'Alle Infos kopieren'}
+      </button>
+    </Section>
+  )
+}
+
+// ─── 8. Bots Diagnose ────────────────────────────────────────────────────────
 
 const BOT_TEMPLATES: Record<string, Record<string, unknown>> = {
   rule_based: { indicator: 'RSI', timeframe: '1h' },
@@ -940,12 +1148,14 @@ export function DebugPage() {
         </div>
 
         <div className="space-y-4">
+          <BinanceLeaderboardSection />
           <EnvSection />
           <ConnectionSection />
           <AuthSection />
           <BotsDiagnoseSection />
           <RequestLogSection onClear={() => forceUpdate((n) => n + 1)} />
           <EndpointTester />
+          <SystemInfoSection />
         </div>
       </div>
     </div>

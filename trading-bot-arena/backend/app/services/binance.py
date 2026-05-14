@@ -233,6 +233,8 @@ async def get_copy_trading_leaders(
     sort_by: "ROI" | "PNL"
     period:  "DAILY" | "WEEKLY" | "MONTHLY" | "ALL"
     Returns a normalised list ready for the frontend.
+
+    Tries multiple endpoint variants in order and returns the first successful result.
     """
     cache_key = f"{sort_by}:{period}:{limit}"
     now = time.time()
@@ -240,68 +242,129 @@ async def get_copy_trading_leaders(
     if cached and (now - cached[0]) < _LEADERS_CACHE_TTL_S:
         return cached[1]
 
-    timeout = httpx.Timeout(12.0)
+    # Proper browser headers — required to pass Cloudflare on Binance
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": "https://www.binance.com",
+        "Referer": "https://www.binance.com/en/copy-trading",
+        "clienttype": "web",
+        "lang": "en",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                f"{_BINANCE_LB_V2}/getLeaderboardRank",
-                json={
-                    "isTrader": False,
-                    "statisticsType": sort_by,
-                    "tradeType": "PERPETUAL",
-                    "periodType": period,
-                    "dataType": "TRADE",
-                },
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+    # Binance periodType mapping ("ALL" is not a valid value — use "TOTAL" as fallback)
+    period_map = {"DAILY": "DAILY", "WEEKLY": "WEEKLY", "MONTHLY": "MONTHLY", "ALL": "TOTAL"}
+    binance_period = period_map.get(period, "MONTHLY")
 
-            if data.get("code") != "000000":
-                logger.warning(
-                    "Leaderboard API returned non-zero code",
-                    extra={"code": data.get("code"), "msg": data.get("message")},
+    body = {
+        "isTrader": False,
+        "statisticsType": sort_by,
+        "tradeType": "PERPETUAL",
+        "periodType": binance_period,
+        "dataType": "TRADE",
+    }
+
+    # Try endpoints in priority order
+    endpoints = [
+        ("POST", f"{_BINANCE_LB_V2}/getLeaderboardRank"),
+        ("POST", f"{_BINANCE_LEADERBOARD_BASE}/getLeaderboardRank"),
+        ("GET",  f"{_BINANCE_LEADERBOARD_BASE}/getLeaderboardRank"),
+    ]
+
+    last_error = "unknown"
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
+        for method, url in endpoints:
+            try:
+                if method == "POST":
+                    resp = await client.post(url, json=body, headers=headers)
+                else:
+                    params = {
+                        "isTrader": "false",
+                        "statisticsType": sort_by,
+                        "tradeType": "PERPETUAL",
+                        "periodType": binance_period,
+                    }
+                    resp = await client.get(url, params=params, headers=headers)
+
+                logger.info(
+                    f"Leaderboard API attempt: {method} {url} → {resp.status_code}",
                 )
-                return []
 
-            raw_list: list[dict] = data.get("data") or []
-            leaders = []
-            for item in raw_list[:limit]:
-                portfolio_id = item.get("portfolioId") or item.get("encryptedUid", "")
-                if not portfolio_id:
+                if resp.status_code != 200:
+                    last_error = f"HTTP {resp.status_code} from {url}"
                     continue
-                # Cache UID so get_copy_leader_positions() doesn't need to look it up
-                encrypted_uid = item.get("encryptedUid", "")
-                if encrypted_uid and portfolio_id:
-                    _leader_uid_cache[portfolio_id] = encrypted_uid
 
-                leaders.append({
-                    "portfolio_id": portfolio_id,
-                    "nick_name": item.get("nickName") or item.get("nickname") or "Unknown",
-                    "roi": float(item.get("roi") or item.get("pnlRoi") or 0) * 100,
-                    "pnl": float(item.get("pnl") or 0),
-                    "win_rate": float(item.get("winRate") or 0) * 100,
-                    "follower_count": int(item.get("followerCount") or 0),
-                    "copier_count": int(item.get("copierCount") or 0),
-                    "position_shared": bool(item.get("positionShared", True)),
-                    "max_drawdown": float(item.get("maxDrawdown") or 0) * 100,
-                })
+                data = resp.json()
 
-            _leaders_cache[cache_key] = (now, leaders)
-            logger.info(
-                "Copy trading leaders fetched",
-                extra={"sort_by": sort_by, "period": period, "count": len(leaders)},
-            )
-            return leaders
+                if data.get("code") != "000000":
+                    last_error = f"API code {data.get('code')}: {data.get('message')}"
+                    logger.warning(f"Leaderboard non-zero code: {last_error}")
+                    continue
 
-    except Exception as exc:
-        logger.warning("Failed to fetch copy trading leaders", extra={"error": str(exc)})
-        return []
+                raw_list: list[dict] = data.get("data") or []
+                if not raw_list:
+                    last_error = "empty data array in response"
+                    continue
+
+                leaders = _parse_leaders(raw_list[:limit])
+                _leaders_cache[cache_key] = (now, leaders)
+                logger.info(
+                    f"Copy trading leaders fetched: {len(leaders)} traders "
+                    f"(sort={sort_by}, period={period})"
+                )
+                return leaders
+
+            except httpx.HTTPStatusError as exc:
+                last_error = f"HTTPStatusError {exc.response.status_code}: {url}"
+                logger.warning(f"Leaderboard endpoint failed: {last_error}")
+            except httpx.ConnectError as exc:
+                last_error = f"ConnectError: {exc}"
+                logger.warning(f"Leaderboard connect error: {last_error}")
+            except httpx.TimeoutException:
+                last_error = f"Timeout on {url}"
+                logger.warning(f"Leaderboard timeout: {url}")
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                logger.warning(f"Leaderboard unexpected error: {last_error}")
+
+    logger.warning(f"All leaderboard endpoints failed. Last error: {last_error}")
+    return []
+
+
+def _parse_leaders(raw_list: list[dict]) -> list[dict]:
+    """Normalise raw Binance leaderboard items into our standard dict format."""
+    leaders = []
+    for item in raw_list:
+        portfolio_id = item.get("portfolioId") or item.get("encryptedUid", "")
+        if not portfolio_id:
+            continue
+        encrypted_uid = item.get("encryptedUid", "")
+        if encrypted_uid and portfolio_id:
+            _leader_uid_cache[portfolio_id] = encrypted_uid
+
+        # ROI/PnL may come as a decimal (0.1234 = 12.34%) — multiply by 100
+        roi_raw = item.get("roi") or item.get("pnlRoi") or 0
+        win_raw = item.get("winRate") or 0
+        dd_raw = item.get("maxDrawdown") or 0
+
+        leaders.append({
+            "portfolio_id": portfolio_id,
+            "nick_name": item.get("nickName") or item.get("nickname") or "Unknown",
+            "roi": float(roi_raw) * 100,
+            "pnl": float(item.get("pnl") or 0),
+            "win_rate": float(win_raw) * 100,
+            "follower_count": int(item.get("followerCount") or 0),
+            "copier_count": int(item.get("copierCount") or 0),
+            "position_shared": bool(item.get("positionShared", True)),
+            "max_drawdown": float(dd_raw) * 100,
+        })
+    return leaders
 
 
 async def get_copy_leader_positions(portfolio_id: str, trading_pair: str) -> dict:

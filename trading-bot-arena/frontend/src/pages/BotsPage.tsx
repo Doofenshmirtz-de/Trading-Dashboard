@@ -209,14 +209,26 @@ function CopyTradingConfig({
             </div>
           )}
           {isError && (
-            <div className="text-center py-4 text-amber-600 text-xs">
-              Binance Leaderboard nicht verfügbar — bitte manuell eingeben.
+            <div className="py-3 px-3 rounded-lg border border-amber-800/40 bg-amber-900/20 text-xs text-amber-400 space-y-1">
+              <p className="font-medium">Binance Leaderboard nicht erreichbar</p>
+              <p className="text-amber-600">
+                Mögliche Ursachen: Binance blockiert Railway-IPs (Cloudflare), API-Änderung, oder Netzwerkproblem.
+                Nutze den <button type="button" onClick={() => setTab('manual')} className="underline hover:text-amber-300">Manuell-Tab</button> um eine Portfolio-ID einzugeben.
+              </p>
             </div>
           )}
           {!isLoading && !isError && (
             <div className="overflow-y-auto max-h-56 rounded-lg border border-slate-700 divide-y divide-slate-700/50">
               {(data?.leaders ?? []).length === 0 ? (
-                <p className="text-center py-4 text-slate-500 text-xs">Keine Trader gefunden</p>
+                <div className="text-center py-5 text-slate-500 text-xs space-y-2">
+                  <p>Keine Trader geladen.</p>
+                  <p className="text-slate-600">
+                    Die Binance API liefert aktuell keine Daten.{' '}
+                    <button type="button" onClick={() => setTab('manual')} className="text-amber-500 underline">
+                      Manuell eingeben
+                    </button>
+                  </p>
+                </div>
               ) : (
                 (data?.leaders ?? []).map((leader) => {
                   const isSelected = leader.portfolio_id === selectedId

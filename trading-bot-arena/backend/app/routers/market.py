@@ -160,18 +160,29 @@ async def get_market_regime(
 
 @router.get("/copy-trading/leaders")
 async def get_copy_trading_leaders(
-    sort_by: str = Query(default="ROI", regex="^(ROI|PNL)$"),
-    period: str = Query(default="MONTHLY", regex="^(DAILY|WEEKLY|MONTHLY|ALL)$"),
+    sort_by: str = Query(default="ROI", pattern="^(ROI|PNL)$"),
+    period: str = Query(default="MONTHLY", pattern="^(DAILY|WEEKLY|MONTHLY|ALL)$"),
     limit: int = Query(default=20, ge=1, le=50),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """
     Fetch top Binance Lead Traders from the public leaderboard.
     Cached for 5 minutes. Used by the Copy Trading bot creation UI.
+    Returns empty list (not 503) if Binance is unreachable — frontend handles gracefully.
     """
+    t0 = time.time()
     leaders = await binance_service.get_copy_trading_leaders(
         sort_by=sort_by,
         period=period,
         limit=limit,
+    )
+    latency = int((time.time() - t0) * 1000)
+    logger.info(
+        "Copy trading leaders requested",
+        extra={
+            "user_id": current_user["user_id"],
+            "count": len(leaders),
+            "latency_ms": latency,
+        },
     )
     return {"leaders": leaders, "sort_by": sort_by, "period": period}
